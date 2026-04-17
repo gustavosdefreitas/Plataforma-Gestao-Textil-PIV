@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Banco de Horas{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-primary text-white py-3">
+        <h5 class="mb-0 fw-bold">
+            <i class="fas fa-clock me-2" aria-hidden="true"></i>Banco de Horas
+        </h5>
+    </div>
+    <div class="card-body">
+        <form method="get" action="/banco-horas" class="row g-3">
+            <div class="col-md-4">
+                <label for="filtro_usuario" class="form-label">Usuário</label>
+                <select id="filtro_usuario" name="usuario" class="form-select">
+                    <option value="">Todos</option>
+                    {% for u in usuarios %}
+                    <option value="{{ u.username }}" {% if filtro_usuario == u.username %}selected{% endif %}>
+                        {{ u.username }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="data_inicio" class="form-label">Data inicial</label>
+                <input type="date" id="data_inicio" name="data_inicio" class="form-control" value="{{ data_inicio or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label for="data_fim" class="form-label">Data final</label>
+                <input type="date" id="data_fim" name="data_fim" class="form-control" value="{{ data_fim or '' }}">
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-search me-1" aria-hidden="true"></i> Filtrar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row mb-4 g-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body">
+                <h6 class="text-muted mb-1">Total de Horas</h6>
+                <h3 class="fw-bold text-primary mb-0">{{ total_horas_formatado }}</h3>
+                <small class="text-muted">{{ total_horas }} h decimais</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-5">
+        <div class="card shadow-sm border-0 h-100 border-start border-warning border-3">
+            <div class="card-body">
+                <h6 class="text-muted mb-1"><i class="fas fa-info-circle text-warning me-1" aria-hidden="true"></i>Sobre sessões sem logout</h6>
+                <p class="small text-muted mb-0">
+                    Sessões encerradas sem clique em "Sair" são estimadas até o fim do dia (máx. 8h).
+                    Sessões do dia atual são contadas até o momento presente.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 d-flex align-items-center justify-content-end">
+        <a href="/banco-horas/pdf?usuario={{ filtro_usuario or '' }}&data_inicio={{ data_inicio or '' }}&data_fim={{ data_fim or '' }}"
+           class="btn btn-danger w-100"
+           target="_blank" rel="noopener noreferrer">
+            <i class="fas fa-file-pdf me-2" aria-hidden="true"></i>Gerar PDF
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <caption class="visually-hidden">Relatório de horas trabalhadas por usuário no período filtrado</caption>
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col" class="ps-3">Usuário</th>
+                        <th scope="col">Data</th>
+                        <th scope="col">Horas Trabalhadas</th>
+                        <th scope="col">Horas (decimal)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in resultados %}
+                    <tr>
+                        <td class="ps-3 fw-semibold">{{ item.username }}</td>
+                        <td>{{ item.dia }}</td>
+                        <td class="fw-bold text-success">
+                            <i class="fas fa-clock me-1 text-muted" aria-hidden="true"></i>{{ item.horas_formatadas }}
+                        </td>
+                        <td class="text-muted small">{{ item.horas_trabalhadas }} h</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            <i class="fas fa-clock fa-2x mb-2 d-block opacity-25" aria-hidden="true"></i>
+                            Nenhum registro encontrado para os filtros aplicados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Empresas - Estoque MEI{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <h4 class="mb-0 fw-bold text-primary">
+            <i class="fas fa-city me-2" aria-hidden="true"></i>Empresas Cadastradas
+        </h4>
+        <button class="btn btn-dark btn-sm shadow-sm" data-bs-toggle="modal" data-bs-target="#modalEmpresa">
+            <i class="fas fa-plus me-1" aria-hidden="true"></i> Nova Empresa
+        </button>
+    </div>
+
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <caption class="visually-hidden">Lista de empresas cadastradas</caption>
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">Nome Fantasia</th>
+                        <th scope="col">CNPJ</th>
+                        <th scope="col">Contato</th>
+                        <th scope="col" class="text-center">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in empresas %}
+                    <tr>
+                        <td class="fw-bold">{{ e.nome_fantasia }}</td>
+                        <td>{{ e.cnpj }}</td>
+                        <td>
+                            {{ e.email }}<br>
+                            <small class="text-muted">{{ e.telefone }}</small>
+                        </td>
+                        <td class="text-center">
+                            <a href="/empresas/editar/{{ e.id }}" class="btn btn-outline-primary btn-sm me-1" aria-label="Editar empresa {{ e.nome_fantasia }}">
+                                <i class="fas fa-edit" aria-hidden="true"></i>
+                            </a>
+                            <a href="/empresas/deletar/{{ e.id }}" class="btn btn-outline-danger btn-sm" onclick="return confirm('Excluir esta empresa?')" aria-label="Excluir empresa {{ e.nome_fantasia }}">
+                                <i class="fas fa-trash" aria-hidden="true"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-4">Nenhuma empresa cadastrada.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalEmpresa" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalEmpresaLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <form action="/empresas/nova" method="POST" class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalEmpresaLabel">Cadastrar Empresa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+
+            <div class="modal-body">
+                <label for="cnpj" class="form-label fw-bold">CNPJ</label>
+                <div class="input-group mb-3">
+                    <input type="text" id="cnpj" name="cnpj" placeholder="00.000.000/0000-00" class="form-control" required>
+                    <button type="button" class="btn btn-outline-primary" onclick="consultarCNPJ()">
+                        <i class="fas fa-search me-1" aria-hidden="true"></i> Buscar CNPJ
+                    </button>
+                </div>
+
+                <label for="nome" class="visually-hidden">Nome Fantasia</label>
+                <input type="text" id="nome" name="nome" placeholder="Nome Fantasia" class="form-control mb-3" required>
+                <label for="razao_social" class="visually-hidden">Razão Social</label>
+                <input type="text" id="razao_social" name="razao_social" placeholder="Razão Social" class="form-control mb-3" required>
+                <label for="tel" class="visually-hidden">Telefone</label>
+                <input type="text" id="tel" name="tel" placeholder="Telefone" class="form-control mb-3">
+                <label for="email" class="visually-hidden">E-mail</label>
+                <input type="email" id="email" name="email" placeholder="E-mail" class="form-control mb-3">
+
+                <div id="cnpj-status" class="small text-muted" role="status" aria-live="polite"></div>
+            </div>
+
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-success w-100">Salvar Empresa</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function limparCNPJ(valor) {
+    return valor.replace(/\D/g, '');
+}
+
+function aplicarMascaraCNPJ(valor) {
+    valor = limparCNPJ(valor);
+    valor = valor.replace(/^(\d{2})(\d)/, '$1.$2');
+    valor = valor.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
+    valor = valor.replace(/\.(\d{3})(\d)/, '.$1/$2');
+    valor = valor.replace(/(\d{4})(\d)/, '$1-$2');
+    return valor.substring(0, 18);
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+    const cnpjInput = document.getElementById("cnpj");
+
+    if (cnpjInput) {
+        cnpjInput.addEventListener("input", function () {
+            this.value = aplicarMascaraCNPJ(this.value);
+        });
+    }
+});
+
+async function consultarCNPJ() {
+    const cnpjInput = document.getElementById("cnpj");
+    const status = document.getElementById("cnpj-status");
+    const cnpj = limparCNPJ(cnpjInput.value);
+
+    if (cnpj.length !== 14) {
+        status.className = "small text-danger";
+        status.textContent = "Informe um CNPJ válido com 14 dígitos.";
+        return;
+    }
+
+    status.className = "small text-muted";
+    status.textContent = "Consultando CNPJ...";
+
+    try {
+        const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+
+        if (!response.ok) {
+            throw new Error("Não foi possível consultar o CNPJ.");
+        }
+
+        const data = await response.json();
+
+        document.getElementById("nome").value = data.nome_fantasia || "";
+        document.getElementById("razao_social").value = data.razao_social || "";
+        document.getElementById("tel").value = data.ddd_telefone_1 || data.ddd_telefone_2 || "";
+        document.getElementById("email").value = data.email || "";
+
+        status.className = "small text-success";
+        status.textContent = "Dados encontrados e preenchidos com sucesso.";
+    } catch (error) {
+        console.error(error);
+        status.className = "small text-danger";
+        status.textContent = "Erro ao consultar o CNPJ. Verifique se ele é válido ou tente novamente.";
+    }
+}
+</script>
+{% endblock %}

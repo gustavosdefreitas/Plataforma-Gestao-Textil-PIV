@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Estoque MEI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { height: 100vh; display: flex; align-items: center; justify-content: center; background-color: #f8f9fa; }
+        .card-login { width: 100%; max-width: 400px; }
+    </style>
+</head>
+<body>
+
+<main class="card card-login shadow border-0" id="conteudo-principal">
+    <div class="card-body p-4 text-center">
+        <h1 class="h2 mb-4 fw-bold text-primary"><span aria-hidden="true">📦</span> Plataforma de Gestão estratégica</h1>
+        <p class="text-muted">Entre com suas credenciais</p>
+
+        {% if error %}
+        <div class="alert alert-danger py-2 small" role="alert">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form action="/login" method="POST" aria-label="Formulário de login">
+            <div class="form-floating mb-3">
+                <input type="text" name="username" class="form-control" id="userInput" placeholder="Usuário" required autocomplete="username">
+                <label for="userInput">Usuário</label>
+            </div>
+            <div class="form-floating mb-4">
+                <input type="password" name="password" class="form-control" id="passInput" placeholder="Senha" required autocomplete="current-password">
+                <label for="passInput">Senha</label>
+            </div>
+            <button class="btn btn-primary w-100 btn-lg shadow-sm" type="submit">Acessar Sistema</button>
+        </form>
+    </div>
+    <div class="card-footer bg-transparent border-0 text-center pb-4">
+        <small class="text-muted">Projeto Faculdade &copy; 2026</small>
+    </div>
+</main>
+
+</body>
+</html>

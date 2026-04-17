@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Estoque MEI{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <style>
+        .navbar-brand { font-weight: bold; letter-spacing: 1px; }
+        .nav-link:hover { color: #ffc107 !important; }
+        body { background-color: #f4f7f6; }
+
+        /* Toast de flash message */
+        #flash-toast-container {
+            position: fixed;
+            top: 1.2rem;
+            right: 1.2rem;
+            z-index: 9999;
+            min-width: 280px;
+        }
+        .flash-toast {
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(40px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+    </style>
+</head>
+<body>
+    <a href="#conteudo-principal" class="visually-hidden-focusable">Pular para o conteúdo principal</a>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm mb-4" aria-label="Navegação principal">
+        <div class="container">
+            <a class="navbar-brand" href="/"><i class="fas fa-home me-2" aria-hidden="true"></i>DASHBOARD</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Abrir menu">
+                <span class="navbar-toggler-icon" aria-hidden="true"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link text-warning" href="/vendas"><i class="fas fa-shopping-cart me-1" aria-hidden="true"></i> Vendas</a>
+                    </li>
+                    {% if user and user.perfil == 'admin' %}
+                    <li class="nav-item border-start ms-lg-2 ps-lg-2">
+                        <a class="nav-link" href="/usuarios"><i class="fas fa-users-cog me-1" aria-hidden="true"></i> Usuários</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/fornecedores"><i class="fas fa-truck me-1" aria-hidden="true"></i> Fornecedores</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/produtos"><i class="fas fa-tags me-1" aria-hidden="true"></i> Produtos</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/banco-horas"><i class="fas fa-clock me-2" aria-hidden="true"></i> Banco de Horas</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/empresas"><i class="fas fa-city me-1" aria-hidden="true"></i> Empresas</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/logs"><i class="fas fa-clipboard-list me-1" aria-hidden="true"></i> Logs do Sistema</a>
+                    </li>
+                    {% endif %}
+                </ul>
+                <div class="navbar-nav">
+                    <span class="nav-link text-white d-none d-lg-block">
+                        <i class="fas fa-user-circle me-1" aria-hidden="true"></i> {{ user.username }}
+                        {% if user.perfil == 'admin' %}
+                        <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;">admin</span>
+                        {% endif %}
+                    </span>
+                    <a class="nav-link btn btn-outline-light btn-sm ms-lg-3 px-3" href="/logout">Sair</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    {# Container de flash messages (toast) #}
+    <div id="flash-toast-container" role="alert" aria-live="polite" aria-atomic="true"></div>
+
+    <main id="conteudo-principal" class="container pb-5">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+    // Mapeamento de msg= para texto e cor do toast
+    const flashMessages = {
+        // Produtos
+        produto_criado:      { text: 'Produto cadastrado com sucesso.',   type: 'success' },
+        produto_atualizado:  { text: 'Produto atualizado com sucesso.',   type: 'success' },
+        produto_excluido:    { text: 'Produto excluído com sucesso.',      type: 'success' },
+        produto_com_vendas:  { text: 'Não foi possível excluir: produto possui vendas associadas.', type: 'danger' },
+        // Fornecedores
+        fornecedor_criado:      { text: 'Fornecedor cadastrado com sucesso.',  type: 'success' },
+        fornecedor_atualizado:  { text: 'Fornecedor atualizado com sucesso.',  type: 'success' },
+        fornecedor_excluido:    { text: 'Fornecedor excluído com sucesso.',     type: 'success' },
+    };
+
+    (function () {
+        const params = new URLSearchParams(window.location.search);
+        const msgKey = params.get('msg') || params.get('erro');
+        if (!msgKey) return;
+
+        const flash = flashMessages[msgKey];
+        if (!flash) return;
+
+        const icons = { success: 'fa-check-circle', danger: 'fa-exclamation-triangle', warning: 'fa-exclamation-circle' };
+        const icon = icons[flash.type] || 'fa-info-circle';
+
+        const toast = document.createElement('div');
+        toast.className = `toast flash-toast show align-items-center text-white bg-${flash.type} border-0 mb-2`;
+        toast.setAttribute('role', 'alert');
+        toast.innerHTML = `
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="fas ${icon} me-2" aria-hidden="true"></i>${flash.text}
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fechar"></button>
+            </div>`;
+
+        document.getElementById('flash-toast-container').appendChild(toast);
+
+        // Remove da URL sem recarregar a página
+        const cleanUrl = window.location.pathname +
+            (params.toString().replace(/[&?]?(msg|erro)=[^&]*/g, '').replace(/^&/, '?') || '');
+        history.replaceState(null, '', cleanUrl || window.location.pathname);
+
+        // Auto-fechar após 4 segundos
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    })();
+    </script>
+</body>
+</html>

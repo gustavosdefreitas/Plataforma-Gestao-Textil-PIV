@@ -1,0 +1,669 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Plataforma de Gestão{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="fw-bold mb-1"><i class="fas fa-chart-pie me-2 text-primary" aria-hidden="true"></i>Resumo do Sistema</h2>
+        <p class="text-muted mb-0">Bem-vindo de volta, <strong>{{ user.username }}</strong>!</p>
+    </div>
+</div>
+
+{# Cards de resumo — visíveis para todos #}
+<div class="row g-4 mb-4">
+    <div class="col-md-6 col-xl-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="flex-shrink-0 bg-primary text-white p-3 rounded-3">
+                    <i class="fas fa-boxes fa-2x" aria-hidden="true"></i>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <h6 class="text-muted mb-0">Produtos Cadastrados</h6>
+                    <h3 class="mb-0 fw-bold"><span class="visually-hidden">Total de produtos cadastrados: </span>{{ total_produtos }}</h3>
+                    <small class="text-muted">{{ "%.0f"|format(total_unidades) }} unid. em estoque</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="flex-shrink-0 bg-success text-white p-3 rounded-3">
+                    <i class="fas fa-cart-shopping fa-2x" aria-hidden="true"></i>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <h6 class="text-muted mb-0">Vendas do Mês</h6>
+                    <h3 class="mb-0 fw-bold"><span class="visually-hidden">Total de vendas no mês: </span>{{ total_vendas }}</h3>
+                    <small class="text-muted">transações registradas</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="flex-shrink-0 bg-danger text-white p-3 rounded-3">
+                    <i class="fas fa-dollar-sign fa-2x" aria-hidden="true"></i>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <h6 class="text-muted mb-0">Faturamento do Mês</h6>
+                    <h3 class="mb-0 fw-bold"><span class="visually-hidden">Faturamento do mês: </span>R$ {{ "%.2f"|format(total_vendas_valor) }}</h3>
+                    <small class="text-muted">mês atual</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="flex-shrink-0 bg-warning text-dark p-3 rounded-3">
+                    <i class="fas fa-truck fa-2x" aria-hidden="true"></i>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <h6 class="text-muted mb-0">Fornecedores</h6>
+                    <h3 class="mb-0 fw-bold"><span class="visually-hidden">Total de fornecedores cadastrados: </span>{{ total_fornecedores }}</h3>
+                    <small class="text-muted">{{ total_empresas }} empresa(s) ativa(s)</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Gráfico de estoque por empresa — visível para todos #}
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-primary">
+                    <i class="fas fa-chart-bar me-2" aria-hidden="true"></i>Estoque por Empresa
+                </h5>
+                <span class="badge bg-light text-muted border">
+                    {{ "%.0f"|format(total_unidades) }} unidades totais
+                </span>
+            </div>
+            <div class="card-body">
+                <div style="height: 320px;">
+                    <canvas id="meuGrafico" role="img" aria-label="Gráfico de barras horizontais com o estoque total de unidades por empresa"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body d-flex flex-column justify-content-between p-4">
+                <div>
+                    <h5 class="fw-bold mb-3"><i class="fas fa-bolt me-2 text-warning" aria-hidden="true"></i>Acesso Rápido</h5>
+                    <div class="d-grid gap-2">
+                        <a href="/vendas" class="btn btn-primary text-start">
+                            <i class="fas fa-cart-plus me-2" aria-hidden="true"></i>Nova Venda
+                        </a>
+                        {% if user and user.perfil == 'admin' %}
+                        <a href="/produtos" class="btn btn-outline-primary text-start">
+                            <i class="fas fa-plus me-2" aria-hidden="true"></i>Adicionar Produto
+                        </a>
+                        <a href="/produtos" class="btn btn-outline-secondary text-start">
+                            <i class="fas fa-list me-2" aria-hidden="true"></i>Ver Inventário
+                        </a>
+                        <a href="/fornecedores" class="btn btn-outline-secondary text-start">
+                            <i class="fas fa-truck me-2" aria-hidden="true"></i>Ver Fornecedores
+                        </a>
+                        {% endif %}
+                        <a href="/vendas" class="btn btn-outline-success text-start">
+                            <i class="fas fa-history me-2" aria-hidden="true"></i>Histórico de Vendas
+                        </a>
+                    </div>
+                </div>
+                <p class="text-muted small mb-0 mt-3">
+                    <i class="fas fa-clock me-1" aria-hidden="true"></i>Sistema atualizado em tempo real.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Card de estoque baixo — visível para todos #}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card border-warning shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-warning">
+                    <i class="fas fa-triangle-exclamation me-2" aria-hidden="true"></i>Alerta de Estoque Baixo
+                </h5>
+                <span class="badge bg-warning text-dark">{{ total_estoque_baixo }} produto(s)</span>
+            </div>
+            <div class="card-body p-0">
+                {% if total_estoque_baixo == 0 %}
+                <p class="text-muted text-center py-4 mb-0">Nenhum produto com estoque crítico.</p>
+                {% else %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <caption class="visually-hidden">Produtos com estoque igual ou inferior a 5 unidades</caption>
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" class="ps-3">Produto</th>
+                                <th scope="col">Cor</th>
+                                <th scope="col">Tamanho</th>
+                                <th scope="col">Empresa</th>
+                                <th scope="col">Qtd. em Estoque</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in estoque_baixo %}
+                            <tr>
+                                <td class="ps-3 fw-semibold">{{ item.nome }}</td>
+                                <td>{{ item.cor or '—' }}</td>
+                                <td>{{ item.tamanho or '—' }}</td>
+                                <td>{{ item.nome_fantasia }}</td>
+                                <td>
+                                    <span class="badge bg-danger">{{ "%.0f"|format(item.quantidade) }}</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Top 10 produtos mais vendidos — visível para todos #}
+{% if top_produtos_labels %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 fw-bold text-primary">
+                    <i class="fas fa-trophy me-2" aria-hidden="true"></i>Top 10 Produtos Mais Vendidos — Últimos 6 Meses
+                </h5>
+            </div>
+            <div class="card-body">
+                <div style="height: 380px;">
+                    <canvas id="chartTopProdutos" role="img" aria-label="Gráfico dos 10 produtos mais vendidos"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# Ticket médio por empresa e botão CSV — somente admin #}
+{% if user and user.perfil == 'admin' %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-primary">
+                    <i class="fas fa-receipt me-2" aria-hidden="true"></i>Ticket Médio por Empresa — Mês Atual
+                </h5>
+                <a href="/relatorio/csv" class="btn btn-outline-success btn-sm">
+                    <i class="bi bi-download" aria-hidden="true"></i>
+                    <i class="fas fa-file-csv me-1" aria-hidden="true"></i>Exportar CSV
+                </a>
+            </div>
+            <div class="card-body p-0">
+                {% if ticket_medio_empresas %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <caption class="visually-hidden">Ticket médio, faturamento e vendas do mês por empresa</caption>
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" class="ps-3">Empresa</th>
+                                <th scope="col">Vendas no Mês</th>
+                                <th scope="col">Faturamento</th>
+                                <th scope="col">Ticket Médio</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in ticket_medio_empresas %}
+                            <tr>
+                                <td class="ps-3 fw-semibold">{{ t.nome_fantasia }}</td>
+                                <td>{{ t.total_vendas }}</td>
+                                <td class="text-success fw-bold">R$ {{ "%.2f"|format(t.faturamento) }}</td>
+                                <td class="fw-bold">R$ {{ "%.2f"|format(t.ticket_medio) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted text-center py-4 mb-0">Nenhuma venda registrada no mês atual.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# Evolução de cadastros — somente admin #}
+{% if evolucao_cadastros and evolucao_cadastros.meses %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 fw-bold text-primary">
+                    <i class="fas fa-chart-line me-2" aria-hidden="true"></i>Evolução de Cadastros — Últimos 6 Meses
+                </h5>
+            </div>
+            <div class="card-body">
+                <div style="height: 300px;">
+                    <canvas id="chartCadastros" role="img" aria-label="Gráfico de evolução de cadastros por mês"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+
+{# Gráfico de faturamento por empresa (últimos 6 meses) — visível para admin #}
+{% if user and user.perfil == 'admin' and datasets_vendas %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold text-primary">
+                    <i class="fas fa-chart-line me-2" aria-hidden="true"></i>Faturamento por Empresa — Últimos 6 Meses
+                </h5>
+                <a href="/vendas" class="btn btn-sm btn-outline-primary">Ver vendas</a>
+            </div>
+            <div class="card-body">
+                <div style="height: 280px;">
+                    <canvas id="graficoVendasEmpresa" role="img" aria-label="Gráfico de linhas do faturamento por empresa nos últimos 6 meses"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# Vendas recentes — admin vê tudo, usuário comum vê as próprias #}
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold">
+                    <i class="fas fa-history me-2" aria-hidden="true"></i>Vendas Recentes
+                </h5>
+                <a href="/vendas" class="btn btn-sm btn-outline-primary">Ver todas</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <caption class="visually-hidden">Lista das vendas mais recentes registradas no sistema</caption>
+                        <thead class="table-light">
+                            <tr>
+                                <th scope="col" class="ps-3">Data</th>
+                                <th scope="col">Produto</th>
+                                <th scope="col">Cor</th>
+                                <th scope="col">Tamanho</th>
+                                <th scope="col">Qtd</th>
+                                <th scope="col">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for venda in vendas_recentes %}
+                            <tr>
+                                <td class="ps-3 text-muted small">{{ venda.data_venda.strftime('%d/%m/%Y %H:%M') if venda.data_venda else '' }}</td>
+                                <td class="fw-semibold">{{ venda.nome }}</td>
+                                <td>{{ venda.cor or '—' }}</td>
+                                <td>{{ venda.tamanho or '—' }}</td>
+                                <td>{{ venda.quantidade }}</td>
+                                <td class="text-success fw-bold">R$ {{ "%.2f"|format(venda.total) }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-5">
+                                    <i class="fas fa-shopping-cart fa-2x mb-2 d-block opacity-25" aria-hidden="true"></i>
+                                    Nenhuma venda registrada ainda.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== PI IV: Machine Learning — Previsão de Demanda ===== -->
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card shadow-sm">
+      <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-robot me-2" aria-hidden="true"></i>Previsão de Demanda (ML)</h5>
+        {% if ml_previsao and ml_previsao.r2 is not none %}
+        <span class="badge bg-light text-dark">R² = {{ ml_previsao.r2 }} | Tendência: {{ ml_previsao.tendencia }}</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if ml_previsao and ml_previsao.historico %}
+        <canvas id="chartPrevisaoML" role="img" aria-label="Gráfico de previsão de demanda com machine learning"></canvas>
+        {% else %}
+        <p class="text-muted text-center">Dados insuficientes para gerar previsão. São necessários pelo menos 2 meses de histórico de vendas.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== PI IV: IoT — Painel de Sensores ===== -->
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card shadow-sm border-success">
+      <div class="card-header bg-success text-white">
+        <h5 class="mb-0"><i class="bi bi-cpu me-2" aria-hidden="true"></i>Integração IoT — Sensores de Estoque</h5>
+      </div>
+      <div class="card-body">
+        <p class="text-muted mb-3">Endpoint disponível para receber leituras de sensores físicos (balanças, RFID) em tempo real.</p>
+        <div class="row g-3">
+          <div class="col-md-6">
+            <div class="card bg-light">
+              <div class="card-body">
+                <h6 class="card-title">Atualizar estoque via sensor</h6>
+                <code class="d-block small">POST /api/sensor/estoque</code>
+                <pre class="mt-2 small bg-white p-2 rounded">{"produto_id": 1, "quantidade": 42.5, "sensor_id": "BALANCA-01"}</pre>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card bg-light">
+              <div class="card-body">
+                <h6 class="card-title">Consultar estoque atual</h6>
+                <code class="d-block small">GET /api/sensor/estoque/{produto_id}</code>
+                <pre class="mt-2 small bg-white p-2 rounded">{"produto_id": 1, "quantidade_atual": 42.5, "alerta_estoque_baixo": false}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const labels = {{ labels|tojson }};
+    const valores = {{ valores|tojson }};
+
+    const ctx = document.getElementById('meuGrafico').getContext('2d');
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Unidades em Estoque',
+                data: valores,
+                backgroundColor: [
+                    'rgba(13, 110, 253, 0.85)',
+                    'rgba(25, 135, 84, 0.85)',
+                    'rgba(255, 193, 7, 0.85)',
+                    'rgba(111, 66, 193, 0.85)',
+                    'rgba(220, 53, 69, 0.85)',
+                    'rgba(13, 202, 240, 0.85)'
+                ],
+                borderColor: [
+                    'rgba(13, 110, 253, 1)',
+                    'rgba(25, 135, 84, 1)',
+                    'rgba(255, 193, 7, 1)',
+                    'rgba(111, 66, 193, 1)',
+                    'rgba(220, 53, 69, 1)',
+                    'rgba(13, 202, 240, 1)'
+                ],
+                borderWidth: 1,
+                borderRadius: 10,
+                borderSkipped: false,
+                maxBarThickness: 28
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 900 },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#212529',
+                    titleColor: '#fff',
+                    bodyColor: '#fff',
+                    padding: 12,
+                    displayColors: false,
+                    callbacks: {
+                        label: function(context) {
+                            return 'Estoque: ' + context.raw + ' unidades';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(0, 0, 0, 0.06)' },
+                    ticks: { precision: 0 }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: { color: '#495057', font: { size: 12 } }
+                }
+            }
+        }
+    });
+
+    // Gráfico de faturamento por empresa (últimos 6 meses)
+    {% if user and user.perfil == 'admin' and datasets_vendas %}
+    const mesesVendas = {{ meses_vendas|tojson }};
+    const datasetsVendas = {{ datasets_vendas|tojson }};
+
+    const ctx2 = document.getElementById('graficoVendasEmpresa');
+    if (ctx2) {
+        new Chart(ctx2.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: mesesVendas,
+                datasets: datasetsVendas.map(ds => ({
+                    ...ds,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                    borderWidth: 2,
+                }))
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 900 },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: { boxWidth: 12, font: { size: 12 } }
+                    },
+                    tooltip: {
+                        backgroundColor: '#212529',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        padding: 12,
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': R$ ' +
+                                    parseFloat(context.raw).toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: 'rgba(0,0,0,0.05)' } },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString('pt-BR');
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    {% endif %}
+
+    // Gráfico: Top 10 produtos mais vendidos
+    {% if top_produtos_labels %}
+    const topProdutosLabels = {{ top_produtos_labels|tojson }};
+    const topProdutosValores = {{ top_produtos_valores|tojson }};
+    const ctxTop = document.getElementById('chartTopProdutos');
+    if (ctxTop) {
+        const azulShades = [
+            'rgba(13,110,253,0.95)', 'rgba(13,110,253,0.88)',
+            'rgba(13,110,253,0.81)', 'rgba(13,110,253,0.74)',
+            'rgba(13,110,253,0.67)', 'rgba(13,110,253,0.60)',
+            'rgba(13,110,253,0.53)', 'rgba(13,110,253,0.46)',
+            'rgba(13,110,253,0.39)', 'rgba(13,110,253,0.32)',
+        ];
+        new Chart(ctxTop.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: topProdutosLabels,
+                datasets: [{
+                    label: 'Unidades vendidas',
+                    data: topProdutosValores,
+                    backgroundColor: azulShades.slice(0, topProdutosValores.length),
+                    borderColor: 'rgba(13,110,253,1)',
+                    borderWidth: 1,
+                    borderRadius: 6,
+                    maxBarThickness: 24,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => 'Vendidos: ' + ctx.raw + ' un.'
+                        }
+                    }
+                },
+                scales: {
+                    x: { beginAtZero: true, ticks: { precision: 0 } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+    {% endif %}
+
+    // Gráfico: Evolução de cadastros (admin)
+    {% if user and user.perfil == 'admin' and evolucao_cadastros and evolucao_cadastros.meses %}
+    const cadastrosMeses = {{ evolucao_cadastros.meses|tojson }};
+    const cadastrosProdutos = {{ evolucao_cadastros.produtos_por_mes|tojson }};
+    const cadastrosFornecedores = {{ evolucao_cadastros.fornecedores_por_mes|tojson }};
+    const ctxCad = document.getElementById('chartCadastros');
+    if (ctxCad) {
+        new Chart(ctxCad.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: cadastrosMeses,
+                datasets: [
+                    {
+                        label: 'Produtos',
+                        data: cadastrosProdutos,
+                        borderColor: 'rgba(13,110,253,1)',
+                        backgroundColor: 'rgba(13,110,253,0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 5,
+                    },
+                    {
+                        label: 'Fornecedores',
+                        data: cadastrosFornecedores,
+                        borderColor: 'rgba(25,135,84,1)',
+                        backgroundColor: 'rgba(25,135,84,0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 5,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' },
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
+                }
+            }
+        });
+    }
+    {% endif %}
+
+    // PI IV — Gráfico ML: Previsão de Demanda
+    {% if ml_previsao and ml_previsao.historico %}
+    (function() {
+        const labelsHist = {{ ml_previsao.labels_hist | tojson }};
+        const labelsFut = {{ ml_previsao.labels_futuros | tojson }};
+        const historico = {{ ml_previsao.historico | tojson }};
+        const previsao = {{ ml_previsao.previsao | tojson }};
+
+        const allLabels = [...labelsHist, ...labelsFut];
+        const dadosHistorico = [...historico, ...Array(labelsFut.length).fill(null)];
+        const dadosPrevisao = [
+            ...Array(labelsHist.length - 1).fill(null),
+            historico[historico.length - 1],
+            ...previsao
+        ];
+
+        new Chart(document.getElementById('chartPrevisaoML'), {
+            type: 'line',
+            data: {
+                labels: allLabels,
+                datasets: [
+                    {
+                        label: 'Histórico de Vendas (unid.)',
+                        data: dadosHistorico,
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4
+                    },
+                    {
+                        label: 'Previsão ML (próx. 3 meses)',
+                        data: dadosPrevisao,
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        borderDash: [6, 3],
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 5,
+                        pointStyle: 'triangle'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Unidades vendidas' } }
+                }
+            }
+        });
+    })();
+    {% endif %}
+</script>
+{% endblock %}

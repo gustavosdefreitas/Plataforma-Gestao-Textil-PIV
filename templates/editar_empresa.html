@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Editar Empresa - Estoque MEI{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-primary text-white py-3">
+                <h5 class="mb-0 fw-bold"><i class="fas fa-edit me-2" aria-hidden="true"></i>Editar Dados da Empresa</h5>
+            </div>
+            <div class="card-body p-4">
+                <form action="/empresas/editar/{{ empresa.id }}" method="POST">
+                    <div class="mb-3">
+                        <label for="editar_empresa_nome" class="form-label fw-bold">Nome Fantasia</label>
+                        <input type="text" id="editar_empresa_nome" name="nome" class="form-control" value="{{ empresa.nome_fantasia }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editar_empresa_cnpj" class="form-label fw-bold">CNPJ</label>
+                        <input type="text" id="editar_empresa_cnpj" name="cnpj" class="form-control" value="{{ empresa.cnpj }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="editar_empresa_tel" class="form-label fw-bold">Telefone</label>
+                        <input type="text" id="editar_empresa_tel" name="tel" class="form-control" value="{{ empresa.telefone }}">
+                    </div>
+                    <div class="mb-4">
+                        <label for="editar_empresa_email" class="form-label fw-bold">E-mail</label>
+                        <input type="email" id="editar_empresa_email" name="email" class="form-control" value="{{ empresa.email }}">
+                    </div>
+                    
+                    <div class="d-flex gap-2">
+                        <a href="/empresas" class="btn btn-outline-secondary w-50">Cancelar</a>
+                        <button type="submit" class="btn btn-primary w-50 fw-bold">Salvar Alterações</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

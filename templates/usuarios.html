@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Usuários - Estoque MEI{% endblock %}
+
+{% block content %}
+    <div class="card shadow-sm border-0 mb-4">
+    	<div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <h4 class="mb-0 fw-bold text-primary">
+	    <i class="fas fa-users-cog me-2" aria-hidden="true"></i> Gestão de Usuários</h4>
+        <button class="btn btn-dark btn-sm shadow-sm" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
+                <i class="fas fa-plus me-1" aria-hidden="true"></i> Novo Usuário
+        </button>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <table class="table table-hover align-middle">
+                <caption class="visually-hidden">Lista de usuários do sistema</caption>
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col">ID</th>
+                        <th scope="col">Nome de Usuário</th>
+                        <th scope="col">Perfil</th>
+                        <th scope="col" class="text-end">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in usuarios %}
+                    <tr>
+                        <td>{{ u.id }}</td>
+                        <td>{{ u.username }}</td>
+                        <td>
+                            <span class="badge bg-primary">{{ u.perfil }}</span>
+                        </td>
+                        <td class="text-end">
+                            <div class="btn-group">
+                               
+                                <button class="btn btn-outline-warning btn-sm me-1"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#modalEditar{{ u.id }}"
+                                        title="Editar Usuário"
+                                        aria-label="Editar usuário {{ u.username }}">
+                                    <i class="fas fa-edit" aria-hidden="true"></i>
+                                </button>
+
+                                {% if u.username != user.username %}
+                                <a href="/usuarios/deletar/{{ u.id }}"
+				   class="btn btn-sm btn-outline-danger" onclick="return confirm('Excluir este usuário?')"
+				   aria-label="Excluir usuário {{ u.username }}">
+                                    <i class="fas fa-trash" aria-hidden="true"></i>
+                                </a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+
+                    <div class="modal fade" id="modalEditar{{ u.id }}" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalEditarLabel{{ u.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content shadow-lg">
+                                <form action="/usuarios/editar/{{ u.id }}" method="POST">
+                                    <div class="modal-header bg-warning">
+                                        <h5 class="modal-title fw-bold text-dark" id="modalEditarLabel{{ u.id }}"><i class="fas fa-user-edit me-2" aria-hidden="true"></i>Editar Usuário: {{ u.username }}</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                                    </div>
+                                    <div class="modal-body text-dark">
+                                        <div class="mb-3">
+                                            <label for="edit_username_{{ u.id }}" class="form-label">Nome de Usuário</label>
+                                            <input type="text" id="edit_username_{{ u.id }}" name="username" value="{{ u.username }}" class="form-control" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="edit_perfil_{{ u.id }}" class="form-label">Perfil</label>
+                                            <select id="edit_perfil_{{ u.id }}" name="perfil" class="form-select">
+                                                <option value="admin" {% if u.perfil == 'admin' %}selected{% endif %}>Administrador</option>
+                                                <option value="operador" {% if u.perfil == 'operador' %}selected{% endif %}>Operador</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="edit_password_{{ u.id }}" class="form-label text-muted">Nova Senha (deixe vazio para não alterar)</label>
+                                            <input type="password" id="edit_password_{{ u.id }}" name="password" class="form-control" autocomplete="new-password">
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                        <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalNovoUsuario" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalNovoUsuarioLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="/usuarios/novo" method="post" class="modal-content border-0 shadow">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold" id="modalNovoUsuarioLabel">Cadastrar Novo Usuário</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body p-4 text-start text-dark">
+                <div class="mb-3">
+                    <label for="novo_usuario_username" class="form-label fw-bold">Nome de Usuário</label>
+                    <input type="text" id="novo_usuario_username" name="username" class="form-control" required placeholder="Digite o login" autocomplete="username">
+                </div>
+                <div class="mb-3">
+                    <label for="novo_usuario_perfil" class="form-label fw-bold">Perfil de Acesso</label>
+                    <select id="novo_usuario_perfil" name="perfil" class="form-select">
+                        <option value="admin">Administrador</option>
+                        <option value="operador">Operador</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                        <label for="novo_usuario_password" class="form-label fw-bold">Senha Inicial</label>
+                        <input type="password" id="novo_usuario_password" name="password" class="form-control" required placeholder="Digite a senha" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-success px-4">Cadastrar Usuário</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

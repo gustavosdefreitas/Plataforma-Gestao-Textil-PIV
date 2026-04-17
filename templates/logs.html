@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Logs do Sistema{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <h4 class="mb-0 fw-bold text-primary">
+	    <i class="fas fa-clipboard-list me-2" aria-hidden="true"></i> Logs do Sistema</h4>
+    </div>
+    <div class="card-body">
+        <form method="get" action="/logs" class="row g-3">
+            <div class="col-md-4">
+                <label for="filtro_acao" class="form-label">Ação</label>
+                <select id="filtro_acao" name="acao" class="form-select">
+                    <option value="">Todas</option>
+                    {% for item in acoes_disponiveis %}
+                        <option value="{{ item.acao }}" {% if filtro_acao == item.acao %}selected{% endif %}>
+                            {{ item.acao }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label for="filtro_usuario_logs" class="form-label">Usuário</label>
+                <input type="text" id="filtro_usuario_logs" name="usuario" class="form-control" value="{{ filtro_usuario or '' }}" placeholder="Digite o nome do usuário">
+            </div>
+
+            <div class="col-md-4 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-search me-1" aria-hidden="true"></i> Filtrar
+                </button>
+                <a href="/logs" class="btn btn-outline-secondary">
+                    Limpar
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <caption class="visually-hidden">Registros de logs do sistema</caption>
+                <thead class="table-light">
+                    <tr>
+                        <th scope="col" class="ps-3">Data</th>
+                        <th scope="col">Usuário</th>
+                        <th scope="col">Ação</th>
+                        <th scope="col">Detalhes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td class="ps-3 small text-muted">{{ log.data_evento }}</td>
+                        <td>{{ log.username or '-' }}</td>
+                        <td><span class="badge bg-secondary">{{ log.acao }}</span></td>
+                        <td>{{ log.detalhes or '-' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-4 text-muted">
+                            Nenhum log encontrado.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% if total_paginas > 1 %}
+<nav class="mt-4" aria-label="Paginação dos logs">
+    <ul class="pagination justify-content-center">
+
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            <a class="page-link"
+               href="/logs?page={{ page - 1 }}{% if filtro_acao %}&acao={{ filtro_acao }}{% endif %}{% if filtro_usuario %}&usuario={{ filtro_usuario }}{% endif %}">
+                Anterior
+            </a>
+        </li>
+
+        {% for p in range(1, total_paginas + 1) %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+            <a class="page-link"
+               href="/logs?page={{ p }}{% if filtro_acao %}&acao={{ filtro_acao }}{% endif %}{% if filtro_usuario %}&usuario={{ filtro_usuario }}{% endif %}">
+                {{ p }}
+            </a>
+        </li>
+        {% endfor %}
+
+        <li class="page-item {% if page >= total_paginas %}disabled{% endif %}">
+            <a class="page-link"
+               href="/logs?page={{ page + 1 }}{% if filtro_acao %}&acao={{ filtro_acao }}{% endif %}{% if filtro_usuario %}&usuario={{ filtro_usuario }}{% endif %}">
+                Próxima
+            </a>
+        </li>
+
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
