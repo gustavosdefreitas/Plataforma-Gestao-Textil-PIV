@@ -42,10 +42,11 @@
                 <caption class="visually-hidden">Lista de fornecedores cadastrados no sistema</caption>
                 <thead class="table-light">
                     <tr>
-                        <th scope="col" style="width: 35%;">Nome / Empresa</th>
-                        <th scope="col" style="width: 20%;">CNPJ</th>
-                        <th scope="col" style="width: 20%;">Telefone</th>
-                        <th scope="col" style="width: 25%; text-align: center;">Ações</th>
+                        <th scope="col" style="width: 30%;">Nome / Empresa</th>
+                        <th scope="col" style="width: 18%;">CNPJ</th>
+                        <th scope="col" style="width: 17%;">Situação Cadastral</th>
+                        <th scope="col" style="width: 15%;">Telefone</th>
+                        <th scope="col" style="width: 20%; text-align: center;">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -59,6 +60,17 @@
                         </td>
                         <td>
                             <span class="badge bg-light text-dark border">{{ f.cnpj or '---' }}</span>
+                        </td>
+                        <td>
+                            {% if f.situacao_cadastral == 'ATIVA' %}
+                                <span class="badge bg-success">ATIVA</span>
+                            {% elif f.situacao_cadastral in ['INAPTA', 'SUSPENSA', 'BAIXADA', 'CANCELADA'] %}
+                                <span class="badge bg-danger">{{ f.situacao_cadastral }}</span>
+                            {% elif f.situacao_cadastral %}
+                                <span class="badge bg-warning text-dark">{{ f.situacao_cadastral }}</span>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
                         </td>
                         <td>{{ f.telefone or '---' }}</td>
                         <td class="text-center">
@@ -111,6 +123,7 @@
                                             <label for="edit_email_{{ f.id }}" class="form-label">E-mail</label>
                                             <input type="email" id="edit_email_{{ f.id }}" name="email" value="{{ f.email or '' }}" class="form-control" placeholder="contato@fornecedor.com">
                                         </div>
+                                        <input type="hidden" name="situacao_cadastral" value="{{ f.situacao_cadastral or '' }}">
                                     </div>
                                     <div class="modal-footer bg-light">
                                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
@@ -194,6 +207,7 @@
                         <label for="email_fornecedor" class="form-label">E-mail</label>
                         <input type="email" id="email_fornecedor" name="email" class="form-control" placeholder="contato@fornecedor.com">
                     </div>
+                    <input type="hidden" id="situacao_cadastral_fornecedor" name="situacao_cadastral" value="">
                     <div id="cnpj-status-fornecedor" class="small text-muted" role="status" aria-live="polite"></div>
                 </div>
                 <div class="modal-footer bg-light">
@@ -251,8 +265,19 @@ async function consultarCNPJFornecedor() {
         document.getElementById("telefone_fornecedor").value = data.ddd_telefone_1 || data.ddd_telefone_2 || "";
         document.getElementById("email_fornecedor").value = data.email || "";
 
+        const sit = (data.descricao_situacao_cadastral || "").toUpperCase();
+        let badgeClass = "bg-warning text-dark";
+        if (sit === "ATIVA") badgeClass = "bg-success";
+        else if (["INAPTA", "SUSPENSA", "BAIXADA", "CANCELADA"].includes(sit)) badgeClass = "bg-danger";
+        const badgeHtml = sit
+            ? ` <span class="badge ${badgeClass}">${sit}</span>`
+            : "";
+
+        const hiddenSit = document.getElementById("situacao_cadastral_fornecedor");
+        if (hiddenSit) hiddenSit.value = sit;
+
         status.className = "small text-success";
-        status.textContent = "Dados preenchidos com sucesso.";
+        status.innerHTML = "Dados preenchidos com sucesso." + badgeHtml;
     } catch (error) {
         status.className = "small text-danger";
         status.textContent = "Erro ao consultar o CNPJ. Verifique se ele é válido.";

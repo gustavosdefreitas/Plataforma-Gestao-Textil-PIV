@@ -10,7 +10,7 @@
                 <h5 class="mb-0 fw-bold"><i class="fas fa-edit me-2" aria-hidden="true"></i>Editar Dados da Empresa</h5>
             </div>
             <div class="card-body p-4">
-                <form action="/empresas/editar/{{ empresa.id }}" method="POST">
+                <form action="/empresas/editar/{{ empresa.id }}" method="POST" aria-label="Editar dados da empresa {{ empresa.nome_fantasia }}">
                     <div class="mb-3">
                         <label for="editar_empresa_nome" class="form-label fw-bold">Nome Fantasia</label>
                         <input type="text" id="editar_empresa_nome" name="nome" class="form-control" value="{{ empresa.nome_fantasia }}" required>
@@ -28,9 +28,10 @@
                         <input type="email" id="editar_empresa_email" name="email" class="form-control" value="{{ empresa.email }}">
                     </div>
                     
+                    <input type="hidden" name="situacao_cadastral" value="{{ empresa.situacao_cadastral or '' }}">
                     <div class="d-flex gap-2">
-                        <a href="/empresas" class="btn btn-outline-secondary w-50">Cancelar</a>
-                        <button type="submit" class="btn btn-primary w-50 fw-bold">Salvar Alterações</button>
+                        <a href="/empresas" class="btn btn-outline-secondary w-50" aria-label="Cancelar edição e voltar para a lista de empresas">Cancelar</a>
+                        <button type="submit" class="btn btn-primary w-50 fw-bold" aria-label="Salvar alterações da empresa">Salvar Alterações</button>
                     </div>
                 </form>
             </div>

@@ -660,3 +660,277 @@ class TestDashboard:
         assert "Produtos Cadastrados" in resp.text
         assert "Vendas do Mês" in resp.text
         assert "Faturamento do Mês" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# 10. Situação Cadastral — Empresas
+# ---------------------------------------------------------------------------
+
+class TestSituacaoCadastralEmpresas:
+
+    def test_criar_empresa_com_situacao_ativa(self, client_app, session_admin):
+        """POST /empresas/nova com situacao_cadastral='ATIVA' deve persistir no banco."""
+        resp = client_app.post(
+            "/empresas/nova",
+            data={
+                "cnpj": "55.555.555/0001-55",
+                "razao_social": "Empresa Ativa LTDA",
+                "nome": "Empresa Ativa",
+                "email": "ativa@empresa.com",
+                "tel": "11933333333",
+                "situacao_cadastral": "ATIVA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM empresas WHERE nome_fantasia = 'Empresa Ativa'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral == "ATIVA"
+
+    def test_criar_empresa_com_situacao_inapta(self, client_app, session_admin):
+        """POST /empresas/nova com situacao_cadastral='INAPTA' deve persistir corretamente."""
+        resp = client_app.post(
+            "/empresas/nova",
+            data={
+                "cnpj": "66.666.666/0001-66",
+                "razao_social": "Empresa Inapta LTDA",
+                "nome": "Empresa Inapta",
+                "email": "inapta@empresa.com",
+                "tel": "",
+                "situacao_cadastral": "INAPTA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM empresas WHERE nome_fantasia = 'Empresa Inapta'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral == "INAPTA"
+
+    def test_criar_empresa_sem_situacao_salva_null(self, client_app, session_admin):
+        """POST /empresas/nova sem situacao_cadastral deve salvar NULL."""
+        resp = client_app.post(
+            "/empresas/nova",
+            data={
+                "cnpj": "77.777.777/0001-77",
+                "razao_social": "Empresa Sem Situacao LTDA",
+                "nome": "Empresa Sem Situacao",
+                "email": "",
+                "tel": "",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM empresas WHERE nome_fantasia = 'Empresa Sem Situacao'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral is None
+
+    def test_editar_empresa_atualiza_situacao(self, client_app, session_admin, empresa_id):
+        """POST /empresas/editar/{id} deve atualizar situacao_cadastral no banco."""
+        resp = client_app.post(
+            f"/empresas/editar/{empresa_id}",
+            data={
+                "nome": "Empresa Teste",
+                "cnpj": "00.000.000/0001-00",
+                "tel": "11999999999",
+                "email": "empresa@teste.com",
+                "situacao_cadastral": "SUSPENSA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM empresas WHERE id = :id"),
+                {"id": empresa_id},
+            ).fetchone()
+        assert row.situacao_cadastral == "SUSPENSA"
+
+    def test_editar_empresa_situacao_e_normalizada_para_maiusculo(self, client_app, session_admin, empresa_id):
+        """situacao_cadastral enviada em minúsculo deve ser salva em maiúsculo."""
+        resp = client_app.post(
+            f"/empresas/editar/{empresa_id}",
+            data={
+                "nome": "Empresa Teste",
+                "cnpj": "00.000.000/0001-00",
+                "tel": "11999999999",
+                "email": "empresa@teste.com",
+                "situacao_cadastral": "ativa",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM empresas WHERE id = :id"),
+                {"id": empresa_id},
+            ).fetchone()
+        assert row.situacao_cadastral == "ATIVA"
+
+    def test_situacao_aparece_na_listagem_empresas(self, client_app, session_admin):
+        """GET /empresas deve exibir o badge com a situação cadastral."""
+        client_app.post(
+            "/empresas/nova",
+            data={
+                "cnpj": "88.888.888/0001-88",
+                "razao_social": "Empresa Badge LTDA",
+                "nome": "Empresa Badge",
+                "email": "",
+                "tel": "",
+                "situacao_cadastral": "ATIVA",
+            },
+            cookies=session_admin,
+        )
+
+        resp = client_app.get("/empresas", cookies=session_admin)
+        assert resp.status_code == 200
+        assert "bg-success" in resp.text
+        assert "ATIVA" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# 11. Situação Cadastral — Fornecedores
+# ---------------------------------------------------------------------------
+
+class TestSituacaoCadastralFornecedores:
+
+    def test_criar_fornecedor_com_situacao_ativa(self, client_app, session_admin):
+        """POST /fornecedores/novo com situacao_cadastral='ATIVA' deve persistir no banco."""
+        resp = client_app.post(
+            "/fornecedores/novo",
+            data={
+                "nome": "Fornecedor Ativo",
+                "cnpj": "99.999.999/0001-99",
+                "telefone": "11922222222",
+                "email": "ativo@fornecedor.com",
+                "situacao_cadastral": "ATIVA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM fornecedores WHERE nome = 'Fornecedor Ativo'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral == "ATIVA"
+
+    def test_criar_fornecedor_com_situacao_baixada(self, client_app, session_admin):
+        """POST /fornecedores/novo com situacao_cadastral='BAIXADA' deve persistir corretamente."""
+        resp = client_app.post(
+            "/fornecedores/novo",
+            data={
+                "nome": "Fornecedor Baixado",
+                "cnpj": "10.101.010/0001-10",
+                "telefone": "",
+                "email": "",
+                "situacao_cadastral": "BAIXADA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM fornecedores WHERE nome = 'Fornecedor Baixado'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral == "BAIXADA"
+
+    def test_criar_fornecedor_sem_situacao_salva_null(self, client_app, session_admin):
+        """POST /fornecedores/novo sem situacao_cadastral deve salvar NULL."""
+        resp = client_app.post(
+            "/fornecedores/novo",
+            data={
+                "nome": "Fornecedor Sem Situacao",
+                "cnpj": "",
+                "telefone": "",
+                "email": "",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM fornecedores WHERE nome = 'Fornecedor Sem Situacao'")
+            ).fetchone()
+        assert row is not None
+        assert row.situacao_cadastral is None
+
+    def test_editar_fornecedor_atualiza_situacao(self, client_app, session_admin, fornecedor_id):
+        """POST /fornecedores/editar/{id} deve atualizar situacao_cadastral no banco."""
+        resp = client_app.post(
+            f"/fornecedores/editar/{fornecedor_id}",
+            data={
+                "nome": "Fornecedor Teste",
+                "cnpj": "11.111.111/0001-11",
+                "telefone": "11988888888",
+                "email": "fornecedor@teste.com",
+                "situacao_cadastral": "INAPTA",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM fornecedores WHERE id = :id"),
+                {"id": fornecedor_id},
+            ).fetchone()
+        assert row.situacao_cadastral == "INAPTA"
+
+    def test_editar_fornecedor_situacao_e_normalizada_para_maiusculo(self, client_app, session_admin, fornecedor_id):
+        """situacao_cadastral enviada em minúsculo deve ser salva em maiúsculo."""
+        resp = client_app.post(
+            f"/fornecedores/editar/{fornecedor_id}",
+            data={
+                "nome": "Fornecedor Teste",
+                "cnpj": "11.111.111/0001-11",
+                "telefone": "",
+                "email": "",
+                "situacao_cadastral": "suspensa",
+            },
+            cookies=session_admin,
+        )
+        assert resp.status_code == 303
+
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT situacao_cadastral FROM fornecedores WHERE id = :id"),
+                {"id": fornecedor_id},
+            ).fetchone()
+        assert row.situacao_cadastral == "SUSPENSA"
+
+    def test_situacao_aparece_na_listagem_fornecedores(self, client_app, session_admin):
+        """GET /fornecedores deve exibir o badge com a situação cadastral."""
+        client_app.post(
+            "/fornecedores/novo",
+            data={
+                "nome": "Fornecedor Badge",
+                "cnpj": "20.202.020/0001-20",
+                "telefone": "",
+                "email": "",
+                "situacao_cadastral": "INAPTA",
+            },
+            cookies=session_admin,
+        )
+
+        resp = client_app.get("/fornecedores", cookies=session_admin)
+        assert resp.status_code == 200
+        assert "bg-danger" in resp.text
+        assert "INAPTA" in resp.text

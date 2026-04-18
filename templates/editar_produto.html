@@ -20,13 +20,13 @@
 {% block content %}
 <div class="card p-4">
   <h3>Editar Produto</h3>
-  <form action="/produtos/editar/{{ produto.id }}" method="post">
+  <form action="/produtos/editar/{{ produto.id }}" method="post" aria-label="Formulário de edição do produto {{ produto.nome }}">
 
     <label for="editar_nome">Nome do Produto:</label>
-    <input type="text" id="editar_nome" name="nome" value="{{ produto.nome }}" class="input-gestao">
+    <input type="text" id="editar_nome" name="nome" value="{{ produto.nome }}" class="input-gestao" required aria-required="true">
 
     <label for="editar_quantidade">Quantidade:</label>
-    <input type="number" id="editar_quantidade" name="quantidade" step="0.01" value="{{ produto.quantidade }}" class="input-gestao">
+    <input type="number" id="editar_quantidade" name="quantidade" step="0.01" min="0" value="{{ produto.quantidade }}" class="input-gestao" required aria-required="true">
 
     <label for="editar_cor">Cor:</label>
     <input type="text" id="editar_cor" name="cor" value="{{ produto.cor or '' }}" class="form-control">
@@ -35,7 +35,7 @@
     <input type="text" id="editar_tamanho" name="tamanho" value="{{ produto.tamanho or '' }}" class="form-control">
 
     <label for="editar_preco">Preço:</label>
-    <input type="number" id="editar_preco" name="preco" step="0.01" value="{{ produto.preco }}" class="input-gestao">
+    <input type="number" id="editar_preco" name="preco" step="0.01" min="0" value="{{ produto.preco }}" class="input-gestao" required aria-required="true">
 
     <label for="editar_empresa_id">Empresa:</label>
     <select id="editar_empresa_id" name="empresa_id" class="input-gestao">
@@ -53,7 +53,7 @@
           {% endfor %}
       </select>
 
-    <button type="submit" class="btn btn-success w-100">Salvar Alterações</button>
+    <button type="submit" class="btn btn-success w-100" aria-label="Salvar alterações do produto">Salvar Alterações</button>
   </form>
 </div>
 {% endblock %}

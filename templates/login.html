@@ -25,14 +25,14 @@
 
         <form action="/login" method="POST" aria-label="Formulário de login">
             <div class="form-floating mb-3">
-                <input type="text" name="username" class="form-control" id="userInput" placeholder="Usuário" required autocomplete="username">
+                <input type="text" name="username" class="form-control" id="userInput" placeholder="Usuário" required aria-required="true" autocomplete="username">
                 <label for="userInput">Usuário</label>
             </div>
             <div class="form-floating mb-4">
-                <input type="password" name="password" class="form-control" id="passInput" placeholder="Senha" required autocomplete="current-password">
+                <input type="password" name="password" class="form-control" id="passInput" placeholder="Senha" required aria-required="true" autocomplete="current-password">
                 <label for="passInput">Senha</label>
             </div>
-            <button class="btn btn-primary w-100 btn-lg shadow-sm" type="submit">Acessar Sistema</button>
+            <button class="btn btn-primary w-100 btn-lg shadow-sm" type="submit" aria-label="Entrar no sistema">Acessar Sistema</button>
         </form>
     </div>
     <div class="card-footer bg-transparent border-0 text-center pb-4">

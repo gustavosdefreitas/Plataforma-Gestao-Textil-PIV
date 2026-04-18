@@ -10,7 +10,7 @@
         </h5>
     </div>
     <div class="card-body">
-        <form method="get" action="/banco-horas" class="row g-3">
+        <form method="get" action="/banco-horas" class="row g-3" role="search" aria-label="Filtrar registros do banco de horas">
             <div class="col-md-4">
                 <label for="filtro_usuario" class="form-label">Usuário</label>
                 <select id="filtro_usuario" name="usuario" class="form-select">
@@ -31,7 +31,7 @@
                 <input type="date" id="data_fim" name="data_fim" class="form-control" value="{{ data_fim or '' }}">
             </div>
             <div class="col-md-2 d-flex align-items-end gap-2">
-                <button type="submit" class="btn btn-primary w-100">
+                <button type="submit" class="btn btn-primary w-100" aria-label="Aplicar filtros ao banco de horas">
                     <i class="fas fa-search me-1" aria-hidden="true"></i> Filtrar
                 </button>
             </div>
@@ -63,7 +63,8 @@
     <div class="col-md-3 d-flex align-items-center justify-content-end">
         <a href="/banco-horas/pdf?usuario={{ filtro_usuario or '' }}&data_inicio={{ data_inicio or '' }}&data_fim={{ data_fim or '' }}"
            class="btn btn-danger w-100"
-           target="_blank" rel="noopener noreferrer">
+           target="_blank" rel="noopener noreferrer"
+           aria-label="Gerar relatório PDF do banco de horas">
             <i class="fas fa-file-pdf me-2" aria-hidden="true"></i>Gerar PDF
         </a>
     </div>

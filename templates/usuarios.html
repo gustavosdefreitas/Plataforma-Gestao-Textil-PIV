@@ -3,12 +3,29 @@
 {% block title %}Usuários - Estoque MEI{% endblock %}
 
 {% block content %}
-    <div class="card shadow-sm border-0 mb-4">
-    	<div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+
+{% if request.query_params.get('erro') %}
+<div class="alert alert-danger alert-dismissible fade show" role="alert" aria-live="assertive">
+    <i class="fas fa-exclamation-circle me-2" aria-hidden="true"></i>
+    {{ request.query_params.get('erro') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+</div>
+{% endif %}
+
+{% if request.query_params.get('msg') %}
+<div class="alert alert-success alert-dismissible fade show" role="alert" aria-live="polite">
+    <i class="fas fa-check-circle me-2" aria-hidden="true"></i>
+    {{ request.query_params.get('msg') }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
+</div>
+{% endif %}
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
         <h4 class="mb-0 fw-bold text-primary">
-	    <i class="fas fa-users-cog me-2" aria-hidden="true"></i> Gestão de Usuários</h4>
+            <i class="fas fa-users-cog me-2" aria-hidden="true"></i> Gestão de Usuários</h4>
         <button class="btn btn-dark btn-sm shadow-sm" data-bs-toggle="modal" data-bs-target="#modalNovoUsuario">
-                <i class="fas fa-plus me-1" aria-hidden="true"></i> Novo Usuário
+            <i class="fas fa-plus me-1" aria-hidden="true"></i> Novo Usuário
         </button>
     </div>
 
@@ -19,7 +36,9 @@
                 <thead class="table-light">
                     <tr>
                         <th scope="col">ID</th>
-                        <th scope="col">Nome de Usuário</th>
+                        <th scope="col">Login</th>
+                        <th scope="col">Nome Completo</th>
+                        <th scope="col">CPF</th>
                         <th scope="col">Perfil</th>
                         <th scope="col" class="text-end">Ações</th>
                     </tr>
@@ -29,12 +48,15 @@
                     <tr>
                         <td>{{ u.id }}</td>
                         <td>{{ u.username }}</td>
+                        <td>{{ u.nome_completo or '—' }}</td>
+                        <td>{{ u.cpf or '—' }}</td>
                         <td>
-                            <span class="badge bg-primary">{{ u.perfil }}</span>
+                            <span class="badge {% if u.perfil == 'admin' %}bg-danger{% else %}bg-primary{% endif %}">
+                                {{ 'Administrador' if u.perfil == 'admin' else 'Operador' }}
+                            </span>
                         </td>
                         <td class="text-end">
                             <div class="btn-group">
-                               
                                 <button class="btn btn-outline-warning btn-sm me-1"
                                         data-bs-toggle="modal"
                                         data-bs-target="#modalEditar{{ u.id }}"
@@ -45,8 +67,9 @@
 
                                 {% if u.username != user.username %}
                                 <a href="/usuarios/deletar/{{ u.id }}"
-				   class="btn btn-sm btn-outline-danger" onclick="return confirm('Excluir este usuário?')"
-				   aria-label="Excluir usuário {{ u.username }}">
+                                   class="btn btn-sm btn-outline-danger"
+                                   onclick="return confirm('Excluir este usuário?')"
+                                   aria-label="Excluir usuário {{ u.username }}">
                                     <i class="fas fa-trash" aria-hidden="true"></i>
                                 </a>
                                 {% endif %}
@@ -54,29 +77,52 @@
                         </td>
                     </tr>
 
-                    <div class="modal fade" id="modalEditar{{ u.id }}" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalEditarLabel{{ u.id }}" aria-hidden="true">
+                    <!-- Modal Editar -->
+                    <div class="modal fade" id="modalEditar{{ u.id }}" tabindex="-1" role="dialog"
+                         aria-modal="true" aria-labelledby="modalEditarLabel{{ u.id }}" aria-hidden="true">
                         <div class="modal-dialog modal-dialog-centered">
                             <div class="modal-content shadow-lg">
-                                <form action="/usuarios/editar/{{ u.id }}" method="POST">
+                                <form action="/usuarios/editar/{{ u.id }}" method="POST" aria-label="Editar usuário {{ u.username }}">
                                     <div class="modal-header bg-warning">
-                                        <h5 class="modal-title fw-bold text-dark" id="modalEditarLabel{{ u.id }}"><i class="fas fa-user-edit me-2" aria-hidden="true"></i>Editar Usuário: {{ u.username }}</h5>
+                                        <h5 class="modal-title fw-bold text-dark" id="modalEditarLabel{{ u.id }}">
+                                            <i class="fas fa-user-edit me-2" aria-hidden="true"></i>Editar Usuário: {{ u.username }}
+                                        </h5>
                                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                                     </div>
                                     <div class="modal-body text-dark">
                                         <div class="mb-3">
-                                            <label for="edit_username_{{ u.id }}" class="form-label">Nome de Usuário</label>
-                                            <input type="text" id="edit_username_{{ u.id }}" name="username" value="{{ u.username }}" class="form-control" required>
+                                            <label for="edit_username_{{ u.id }}" class="form-label fw-bold">Login para Acesso</label>
+                                            <input type="text" id="edit_username_{{ u.id }}" name="username"
+                                                   value="{{ u.username }}" class="form-control" required
+                                                   autocomplete="username">
                                         </div>
                                         <div class="mb-3">
-                                            <label for="edit_perfil_{{ u.id }}" class="form-label">Perfil</label>
+                                            <label for="edit_nome_{{ u.id }}" class="form-label fw-bold">Nome Completo</label>
+                                            <input type="text" id="edit_nome_{{ u.id }}" name="nome_completo"
+                                                   value="{{ u.nome_completo or '' }}" class="form-control" required
+                                                   placeholder="Nome completo do usuário">
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="edit_cpf_{{ u.id }}" class="form-label fw-bold">CPF</label>
+                                            <input type="text" id="edit_cpf_{{ u.id }}" name="cpf"
+                                                   value="{{ u.cpf or '' }}" class="form-control" required
+                                                   placeholder="000.000.000-00" maxlength="14"
+                                                   oninput="mascararCPF(this)">
+                                            <div class="invalid-feedback">CPF inválido. Verifique os dígitos.</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="edit_perfil_{{ u.id }}" class="form-label fw-bold">Perfil de Acesso</label>
                                             <select id="edit_perfil_{{ u.id }}" name="perfil" class="form-select">
                                                 <option value="admin" {% if u.perfil == 'admin' %}selected{% endif %}>Administrador</option>
                                                 <option value="operador" {% if u.perfil == 'operador' %}selected{% endif %}>Operador</option>
                                             </select>
                                         </div>
                                         <div class="mb-3">
-                                            <label for="edit_password_{{ u.id }}" class="form-label text-muted">Nova Senha (deixe vazio para não alterar)</label>
-                                            <input type="password" id="edit_password_{{ u.id }}" name="password" class="form-control" autocomplete="new-password">
+                                            <label for="edit_password_{{ u.id }}" class="form-label text-muted">
+                                                Nova Senha <small>(deixe vazio para não alterar)</small>
+                                            </label>
+                                            <input type="password" id="edit_password_{{ u.id }}" name="password"
+                                                   class="form-control" autocomplete="new-password">
                                         </div>
                                     </div>
                                     <div class="modal-footer">
@@ -94,35 +140,129 @@
     </div>
 </div>
 
-<div class="modal fade" id="modalNovoUsuario" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalNovoUsuarioLabel" aria-hidden="true">
+<!-- Modal Novo Usuário -->
+<div class="modal fade" id="modalNovoUsuario" tabindex="-1" role="dialog"
+     aria-modal="true" aria-labelledby="modalNovoUsuarioLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-        <form action="/usuarios/novo" method="post" class="modal-content border-0 shadow">
+        <form action="/usuarios/novo" method="post" class="modal-content border-0 shadow" id="formNovoUsuario">
             <div class="modal-header bg-dark text-white">
-                <h5 class="modal-title fw-bold" id="modalNovoUsuarioLabel">Cadastrar Novo Usuário</h5>
+                <h5 class="modal-title fw-bold" id="modalNovoUsuarioLabel">
+                    <i class="fas fa-user-plus me-2" aria-hidden="true"></i> Cadastrar Novo Usuário
+                </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
             </div>
             <div class="modal-body p-4 text-start text-dark">
+
                 <div class="mb-3">
-                    <label for="novo_usuario_username" class="form-label fw-bold">Nome de Usuário</label>
-                    <input type="text" id="novo_usuario_username" name="username" class="form-control" required placeholder="Digite o login" autocomplete="username">
+                    <label for="novo_usuario_username" class="form-label fw-bold">Login para Acesso</label>
+                    <input type="text" id="novo_usuario_username" name="username"
+                           class="form-control" required
+                           placeholder="Ex: joao.silva"
+                           autocomplete="username">
+                    <div class="form-text">Será usado para entrar no sistema.</div>
                 </div>
+
+                <div class="mb-3">
+                    <label for="novo_usuario_nome" class="form-label fw-bold">Nome Completo</label>
+                    <input type="text" id="novo_usuario_nome" name="nome_completo"
+                           class="form-control" required
+                           placeholder="Nome completo do usuário">
+                </div>
+
+                <div class="mb-3">
+                    <label for="novo_usuario_cpf" class="form-label fw-bold">CPF</label>
+                    <input type="text" id="novo_usuario_cpf" name="cpf"
+                           class="form-control" required
+                           placeholder="000.000.000-00" maxlength="14"
+                           oninput="mascararCPF(this)">
+                    <div class="invalid-feedback">CPF inválido. Verifique os dígitos.</div>
+                </div>
+
                 <div class="mb-3">
                     <label for="novo_usuario_perfil" class="form-label fw-bold">Perfil de Acesso</label>
                     <select id="novo_usuario_perfil" name="perfil" class="form-select">
+                        <option value="operador" selected>Operador</option>
                         <option value="admin">Administrador</option>
-                        <option value="operador">Operador</option>
                     </select>
                 </div>
+
                 <div class="mb-3">
-                        <label for="novo_usuario_password" class="form-label fw-bold">Senha Inicial</label>
-                        <input type="password" id="novo_usuario_password" name="password" class="form-control" required placeholder="Digite a senha" autocomplete="new-password">
+                    <label for="novo_usuario_password" class="form-label fw-bold">Senha Inicial</label>
+                    <input type="password" id="novo_usuario_password" name="password"
+                           class="form-control" required
+                           placeholder="Digite a senha"
+                           autocomplete="new-password">
                 </div>
+
             </div>
             <div class="modal-footer bg-light">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="submit" class="btn btn-success px-4">Cadastrar Usuário</button>
+                <button type="submit" class="btn btn-success px-4">
+                    <i class="fas fa-check me-1" aria-hidden="true"></i> Cadastrar Usuário
+                </button>
             </div>
         </form>
     </div>
 </div>
+
+<script>
+// ── Máscara de CPF: 000.000.000-00 ──────────────────────────────────────
+function mascararCPF(input) {
+    let v = input.value.replace(/\D/g, '').slice(0, 11);
+    if (v.length > 9)      v = v.replace(/(\d{3})(\d{3})(\d{3})(\d{1,2})/, '$1.$2.$3-$4');
+    else if (v.length > 6) v = v.replace(/(\d{3})(\d{3})(\d{1,3})/, '$1.$2.$3');
+    else if (v.length > 3) v = v.replace(/(\d{3})(\d{1,3})/, '$1.$2');
+    input.value = v;
+    // Valida em tempo real após digitar os 14 caracteres (000.000.000-00)
+    if (v.length === 14) {
+        const ok = validarCPF(v);
+        input.classList.toggle('is-invalid', !ok);
+        input.classList.toggle('is-valid',   ok);
+    } else {
+        input.classList.remove('is-invalid', 'is-valid');
+    }
+}
+
+// ── Validação dos dígitos verificadores ─────────────────────────────────
+function validarCPF(cpf) {
+    const d = cpf.replace(/\D/g, '');
+    if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+    let soma = 0;
+    for (let i = 0; i < 9; i++) soma += parseInt(d[i]) * (10 - i);
+    let r = (soma * 10) % 11;
+    if (r === 10 || r === 11) r = 0;
+    if (r !== parseInt(d[9])) return false;
+    soma = 0;
+    for (let i = 0; i < 10; i++) soma += parseInt(d[i]) * (11 - i);
+    r = (soma * 10) % 11;
+    if (r === 10 || r === 11) r = 0;
+    return r === parseInt(d[10]);
+}
+
+// ── Bloqueia submit se CPF inválido ─────────────────────────────────────
+function validarFormulario(form) {
+    const cpfInput = form.querySelector('input[name="cpf"]');
+    if (!cpfInput) return true;
+    if (!validarCPF(cpfInput.value)) {
+        cpfInput.classList.add('is-invalid');
+        cpfInput.focus();
+        return false;   // bloqueia o envio
+    }
+    return true;
+}
+
+// Aplica ao formulário de novo usuário
+document.getElementById('formNovoUsuario')
+    .addEventListener('submit', function(e) {
+        if (!validarFormulario(this)) e.preventDefault();
+    });
+
+// Aplica a cada formulário de edição (um por usuário na tabela)
+document.querySelectorAll('form[action^="/usuarios/editar/"]')
+    .forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            if (!validarFormulario(this)) e.preventDefault();
+        });
+    });
+</script>
 {% endblock %}

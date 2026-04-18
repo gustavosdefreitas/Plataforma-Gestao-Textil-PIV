@@ -32,6 +32,24 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 def hash_password(password: str):
     return hashlib.sha256(password.encode()).hexdigest()
 
+def validar_cpf(cpf: str) -> bool:
+    """Valida CPF verificando os dois dígitos verificadores."""
+    cpf = ''.join(c for c in cpf if c.isdigit())
+    if len(cpf) != 11 or len(set(cpf)) == 1:
+        return False
+    soma = sum(int(cpf[i]) * (10 - i) for i in range(9))
+    d1 = (soma * 10 % 11) % 10
+    if d1 != int(cpf[9]):
+        return False
+    soma = sum(int(cpf[i]) * (11 - i) for i in range(10))
+    d2 = (soma * 10 % 11) % 10
+    return d2 == int(cpf[10])
+
+def formatar_cpf(cpf: str) -> str:
+    """Formata CPF como 000.000.000-00."""
+    cpf = ''.join(c for c in cpf if c.isdigit())
+    return f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}" if len(cpf) == 11 else cpf
+
 def formatar_horas_minutos(valor):
     total_minutos = round(float(valor) * 60)
     horas = total_minutos // 60
@@ -83,10 +101,20 @@ async def lifespan(app: FastAPI):
             CREATE TABLE IF NOT EXISTS usuarios (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
+                nome_completo VARCHAR(150),
+                cpf VARCHAR(14),
                 password VARCHAR(64) NOT NULL,
                 perfil VARCHAR(20) DEFAULT 'user',
                 session_id VARCHAR(36)
             );
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nome_completo VARCHAR(150);
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS cpf VARCHAR(14);
         """))
 
         conn.execute(text("""
@@ -103,6 +131,10 @@ async def lifespan(app: FastAPI):
         """))
 
         conn.execute(text("""
+            ALTER TABLE empresas ADD COLUMN IF NOT EXISTS situacao_cadastral VARCHAR(30);
+        """))
+
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS fornecedores (
                 id SERIAL PRIMARY KEY,
                 nome VARCHAR(100) NOT NULL,
@@ -110,6 +142,10 @@ async def lifespan(app: FastAPI):
                 telefone VARCHAR(20),
                 email VARCHAR(100)
             );
+        """))
+
+        conn.execute(text("""
+            ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS situacao_cadastral VARCHAR(30);
         """))
 
         conn.execute(text("""
@@ -912,7 +948,7 @@ async def listar_usuarios(request: Request):
 
     with engine.connect() as conn:
         usuarios = conn.execute(
-            text("SELECT id, username, perfil FROM usuarios WHERE username != 'admin' ORDER BY id")
+            text("SELECT id, username, nome_completo, cpf, perfil FROM usuarios WHERE username != 'admin' ORDER BY id")
         ).fetchall()
 
     return templates.TemplateResponse(request, "usuarios.html", {
@@ -924,6 +960,8 @@ async def listar_usuarios(request: Request):
 async def novo_usuario(
     request: Request,
     username: str = Form(...),
+    nome_completo: str = Form(...),
+    cpf: str = Form(...),
     password: str = Form(...),
     perfil: str = Form(...)):
 
@@ -931,21 +969,29 @@ async def novo_usuario(
     if not user or user.perfil != "admin":
         return RedirectResponse(url="/", status_code=303)
 
+    if not validar_cpf(cpf):
+        return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
+
+    cpf_formatado = formatar_cpf(cpf)
+
     try:
         with engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO usuarios (username, password, perfil)
-                VALUES (:username, :password, :perfil)
+                INSERT INTO usuarios (username, nome_completo, cpf, password, perfil)
+                VALUES (:username, :nome_completo, :cpf, :password, :perfil)
             """), {
                 "username": username,
+                "nome_completo": nome_completo,
+                "cpf": cpf_formatado,
                 "password": hash_password(password),
                 "perfil": perfil
             })
             conn.commit()
     except IntegrityError:
-        pass
+        return RedirectResponse(url="/usuarios?erro=Login+j%C3%A1+em+uso", status_code=303)
 
-    return RedirectResponse(url="/usuarios", status_code=303)
+    registrar_log(user.id, user.username, "CADASTRO_USUARIO", f"Novo usuário: {username} ({perfil})")
+    return RedirectResponse(url="/usuarios?msg=Usu%C3%A1rio+cadastrado+com+sucesso", status_code=303)
 
 @app.get("/usuarios/deletar/{id}")
 async def deletar_usuario(request: Request, id: int):
@@ -965,6 +1011,8 @@ async def editar_usuario(
     user_id: int,
     request: Request,
     username: str = Form(...),
+    nome_completo: str = Form(...),
+    cpf: str = Form(...),
     perfil: str = Form(...),
     password: str = Form(None)):
 
@@ -972,16 +1020,25 @@ async def editar_usuario(
     if not user or user.perfil != "admin":
         return RedirectResponse(url="/", status_code=303)
 
+    if not validar_cpf(cpf):
+        return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
+
+    cpf_formatado = formatar_cpf(cpf)
+
     with engine.connect() as conn:
         if password:
             conn.execute(text("""
                 UPDATE usuarios
                 SET username = :username,
+                    nome_completo = :nome_completo,
+                    cpf = :cpf,
                     perfil = :perfil,
                     password = :password
                 WHERE id = :id
             """), {
                 "username": username,
+                "nome_completo": nome_completo,
+                "cpf": cpf_formatado,
                 "perfil": perfil,
                 "password": hash_password(password),
                 "id": user_id
@@ -990,16 +1047,21 @@ async def editar_usuario(
             conn.execute(text("""
                 UPDATE usuarios
                 SET username = :username,
+                    nome_completo = :nome_completo,
+                    cpf = :cpf,
                     perfil = :perfil
                 WHERE id = :id
             """), {
                 "username": username,
+                "nome_completo": nome_completo,
+                "cpf": cpf_formatado,
                 "perfil": perfil,
                 "id": user_id
             })
         conn.commit()
 
-    return RedirectResponse(url="/usuarios", status_code=303)
+    registrar_log(user.id, user.username, "EDICAO_USUARIO", f"Usuário editado: {username}")
+    return RedirectResponse(url="/usuarios?msg=Usu%C3%A1rio+atualizado+com+sucesso", status_code=303)
 
 
 # --- FORNECEDORES ---
@@ -1058,7 +1120,8 @@ async def editar_fornecedor(
     nome: str = Form(...),
     cnpj: str = Form(None),
     telefone: str = Form(None),
-    email: str = Form(None)):
+    email: str = Form(None),
+    situacao_cadastral: str = Form(None)):
 
     user = get_current_user(request)
     if not user:
@@ -1070,13 +1133,15 @@ async def editar_fornecedor(
             SET nome = :nome,
                 cnpj = :cnpj,
                 telefone = :telefone,
-                email = :email
+                email = :email,
+                situacao_cadastral = :situacao_cadastral
             WHERE id = :id
         """), {
             "nome": nome,
             "cnpj": cnpj,
             "telefone": telefone,
             "email": email,
+            "situacao_cadastral": (situacao_cadastral or "").upper() or None,
             "id": id
         })
         conn.commit()
@@ -1089,7 +1154,8 @@ async def novo_fornecedor(
     nome: str = Form(...),
     cnpj: str = Form(None),
     telefone: str = Form(None),
-    email: str = Form(None)):
+    email: str = Form(None),
+    situacao_cadastral: str = Form(None)):
 
     user = get_current_user(request)
     if not user:
@@ -1097,13 +1163,14 @@ async def novo_fornecedor(
 
     with engine.connect() as conn:
         conn.execute(text("""
-            INSERT INTO fornecedores (nome, cnpj, telefone, email)
-            VALUES (:nome, :cnpj, :telefone, :email)
+            INSERT INTO fornecedores (nome, cnpj, telefone, email, situacao_cadastral)
+            VALUES (:nome, :cnpj, :telefone, :email, :situacao_cadastral)
         """), {
             "nome": nome,
             "cnpj": cnpj,
             "telefone": telefone,
             "email": email,
+            "situacao_cadastral": (situacao_cadastral or "").upper() or None,
         })
         conn.commit()
 
@@ -1731,18 +1798,20 @@ async def nova_empresa(
     razao_social: str = Form(...),
     cnpj: str = Form(""),
     tel: str = Form(""),
-    email: str = Form("")):
+    email: str = Form(""),
+    situacao_cadastral: str = Form("")):
 
     with engine.connect() as conn:
         conn.execute(text("""
-            INSERT INTO empresas (nome_fantasia, razao_social, cnpj, telefone, email)
-            VALUES (:nome, :razao_social, :cnpj, :telefone, :email)
+            INSERT INTO empresas (nome_fantasia, razao_social, cnpj, telefone, email, situacao_cadastral)
+            VALUES (:nome, :razao_social, :cnpj, :telefone, :email, :situacao_cadastral)
         """), {
             "nome": nome,
             "razao_social": razao_social,
             "cnpj": cnpj,
             "telefone": tel,
-            "email": email
+            "email": email,
+            "situacao_cadastral": (situacao_cadastral or "").upper() or None
         })
         conn.commit()
 
@@ -1785,7 +1854,8 @@ async def atualizar_empresa(
     nome: str = Form(...),
     cnpj: str = Form(...),
     tel: str = Form(...),
-    email: str = Form(...)):
+    email: str = Form(...),
+    situacao_cadastral: str = Form("")):
 
     with engine.connect() as conn:
         conn.execute(text("""
@@ -1793,13 +1863,15 @@ async def atualizar_empresa(
             SET nome_fantasia = :nome,
                 cnpj = :cnpj,
                 telefone = :telefone,
-                email = :email
+                email = :email,
+                situacao_cadastral = :situacao_cadastral
             WHERE id = :id
         """), {
             "nome": nome,
             "cnpj": cnpj,
             "telefone": tel,
             "email": email,
+            "situacao_cadastral": (situacao_cadastral or "").upper() or None,
             "id": id
         })
         conn.commit()
@@ -2041,61 +2113,58 @@ async def banco_horas_pdf(
     except ValueError:
         data_fim = None
 
-    filtros = ["acao IN ('LOGIN', 'LOGOUT')"]
+    filtros = ["l.acao IN ('LOGIN', 'LOGOUT')"]
     params = {}
 
     if usuario:
-        filtros.append("username = :usuario")
+        filtros.append("l.username = :usuario")
         params["usuario"] = usuario
 
     if data_inicio:
-        filtros.append("DATE(data_evento) >= :data_inicio")
+        filtros.append("DATE(l.data_evento) >= :data_inicio")
         params["data_inicio"] = data_inicio
 
     if data_fim:
-        filtros.append("DATE(data_evento) <= :data_fim")
+        filtros.append("DATE(l.data_evento) <= :data_fim")
         params["data_fim"] = data_fim
 
     where_clause = "WHERE " + " AND ".join(filtros)
 
-    # Limite máximo de 8h para sessões sem LOGOUT (evita inflação)
     LIMITE_HORAS = 8
 
     query = f"""
         WITH eventos AS (
             SELECT
-                username,
-                acao,
-                data_evento,
-                DATE(data_evento) AS dia,
-                LEAD(data_evento) OVER (
-                    PARTITION BY username, DATE(data_evento)
-                    ORDER BY data_evento
+                l.username,
+                COALESCE(u.nome_completo, l.username) AS nome_completo,
+                COALESCE(u.cpf, '') AS cpf,
+                l.acao,
+                l.data_evento,
+                DATE(l.data_evento) AS dia,
+                LEAD(l.data_evento) OVER (
+                    PARTITION BY l.username, DATE(l.data_evento)
+                    ORDER BY l.data_evento
                 ) AS proximo_evento,
-                LEAD(acao) OVER (
-                    PARTITION BY username, DATE(data_evento)
-                    ORDER BY data_evento
+                LEAD(l.acao) OVER (
+                    PARTITION BY l.username, DATE(l.data_evento)
+                    ORDER BY l.data_evento
                 ) AS proxima_acao
-            FROM logs_sistema
+            FROM logs_sistema l
+            LEFT JOIN usuarios u ON u.username = l.username
             {where_clause}
         ),
         pares AS (
             SELECT
                 username,
+                nome_completo,
+                cpf,
                 dia,
-                acao,
-                data_evento,
-                proxima_acao,
-                proximo_evento,
                 CASE
-                    -- Par limpo: LOGIN seguido de LOGOUT
                     WHEN acao = 'LOGIN' AND proxima_acao = 'LOGOUT'
                         THEN LEAST(
                             EXTRACT(EPOCH FROM (proximo_evento - data_evento)) / 3600,
                             {LIMITE_HORAS}
                         )
-                    -- LOGIN sem LOGOUT: usa horário atual se for hoje,
-                    -- ou fim do dia (23:59) caso contrário — máx. 8h
                     WHEN acao = 'LOGIN' AND proxima_acao IS NULL
                         THEN LEAST(
                             EXTRACT(EPOCH FROM (
@@ -2115,60 +2184,127 @@ async def banco_horas_pdf(
         )
         SELECT
             username,
+            nome_completo,
+            cpf,
             dia,
             ROUND(SUM(horas_sessao)::numeric, 2) AS horas_trabalhadas
         FROM pares
-        GROUP BY username, dia
-        ORDER BY dia DESC, username
+        GROUP BY username, nome_completo, cpf, dia
+        ORDER BY username, dia
     """
 
     with engine.connect() as conn:
         resultados = conn.execute(text(query), params).fetchall()
 
-    total_horas = sum(float(item.horas_trabalhadas or 0) for item in resultados)
+    total_geral = sum(float(r.horas_trabalhadas or 0) for r in resultados)
 
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     largura, altura = A4
+    MARGEM = 50
+    COL_HORAS = 400
 
-    y = altura - 50
+    def nova_pagina(pdf, altura):
+        pdf.showPage()
+        return altura - MARGEM
+
+    def cabecalho_tabela(pdf, y):
+        pdf.setFillColorRGB(0.2, 0.2, 0.2)
+        pdf.rect(MARGEM, y - 4, largura - 2 * MARGEM, 18, fill=1, stroke=0)
+        pdf.setFillColorRGB(1, 1, 1)
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawString(MARGEM + 4, y + 1, "Data de Acesso")
+        pdf.drawString(COL_HORAS, y + 1, "Tempo no Sistema")
+        pdf.setFillColorRGB(0, 0, 0)
+        return y - 22
+
+    # Cabeçalho do documento
+    y = altura - MARGEM
+
     pdf.setFont("Helvetica-Bold", 16)
-    pdf.drawString(50, y, "Relatório de Banco de Horas")
-
-    y -= 30
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(50, y, f"Usuário: {usuario or 'Todos'}")
-
+    pdf.drawString(MARGEM, y, "Relatório de Banco de Horas")
     y -= 20
-    pdf.drawString(50, y, f"Período: {data_inicio or '---'} até {data_fim or '---'}")
 
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColorRGB(0.4, 0.4, 0.4)
+    periodo_txt = f"Período: {data_inicio or 'início'} até {data_fim or 'hoje'}"
+    pdf.drawString(MARGEM, y, periodo_txt)
+    pdf.drawRightString(largura - MARGEM, y, f"Gerado em: {date.today().strftime('%d/%m/%Y')}")
+    pdf.setFillColorRGB(0, 0, 0)
+    y -= 6
+
+    pdf.setStrokeColorRGB(0.7, 0.7, 0.7)
+    pdf.line(MARGEM, y, largura - MARGEM, y)
     y -= 20
-    pdf.drawString(50, y, f"Total de horas: {formatar_horas_minutos(total_horas)} h")
 
-    y -= 30
-    pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(50, y, "Usuário")
-    pdf.drawString(220, y, "Data")
-    pdf.drawString(380, y, "Horas")
+    # Seção por usuário
+    usuarios_agrupados = {}
+    for r in resultados:
+        key = r.username
+        if key not in usuarios_agrupados:
+            usuarios_agrupados[key] = {
+                "nome_completo": r.nome_completo,
+                "cpf": r.cpf,
+                "registros": []
+            }
+        usuarios_agrupados[key]["registros"].append(r)
 
-    y -= 20
-    pdf.setFont("Helvetica", 10)
+    for username_key, dados in usuarios_agrupados.items():
+        nome = dados["nome_completo"] or username_key
+        cpf_fmt = dados["cpf"] or "Não informado"
+        registros = dados["registros"]
+        total_usuario = sum(float(r.horas_trabalhadas or 0) for r in registros)
 
-    for item in resultados:
-        if y < 50:
-            pdf.showPage()
-            y = altura - 50
-            pdf.setFont("Helvetica-Bold", 10)
-            pdf.drawString(50, y, "Usuário")
-            pdf.drawString(220, y, "Data")
-            pdf.drawString(380, y, "Horas")
-            y -= 20
-            pdf.setFont("Helvetica", 10)
+        if y < 120:
+            y = nova_pagina(pdf, altura)
 
-        pdf.drawString(50, y, str(item.username))
-        pdf.drawString(220, y, str(item.dia))
-        pdf.drawString(380, y, formatar_horas_minutos(item.horas_trabalhadas))
-        y -= 18
+        # Bloco de identificação do usuário
+        pdf.setFillColorRGB(0.93, 0.96, 1.0)
+        pdf.rect(MARGEM, y - 6, largura - 2 * MARGEM, 40, fill=1, stroke=0)
+        pdf.setFillColorRGB(0, 0, 0)
+
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(MARGEM + 8, y + 26, nome)
+
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(MARGEM + 8, y + 10, f"CPF: {cpf_fmt}")
+        pdf.drawRightString(largura - MARGEM - 8, y + 10,
+                            f"Total: {formatar_horas_minutos(total_usuario)}")
+
+        y -= 50
+
+        y = cabecalho_tabela(pdf, y)
+
+        pdf.setFont("Helvetica", 9)
+        for i, reg in enumerate(registros):
+            if y < 50:
+                y = nova_pagina(pdf, altura)
+                y = cabecalho_tabela(pdf, y)
+                pdf.setFont("Helvetica", 9)
+
+            if i % 2 == 0:
+                pdf.setFillColorRGB(0.97, 0.97, 0.97)
+                pdf.rect(MARGEM, y - 4, largura - 2 * MARGEM, 16, fill=1, stroke=0)
+                pdf.setFillColorRGB(0, 0, 0)
+
+            data_fmt = reg.dia.strftime("%d/%m/%Y") if hasattr(reg.dia, "strftime") else str(reg.dia)
+            pdf.drawString(MARGEM + 4, y, data_fmt)
+            pdf.drawString(COL_HORAS, y, formatar_horas_minutos(reg.horas_trabalhadas))
+            y -= 18
+
+        y -= 16
+
+    # Rodapé com total geral
+    if y < 60:
+        y = nova_pagina(pdf, altura)
+
+    pdf.setStrokeColorRGB(0.3, 0.3, 0.3)
+    pdf.line(MARGEM, y, largura - MARGEM, y)
+    y -= 16
+
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(MARGEM, y, "TOTAL GERAL DE HORAS:")
+    pdf.drawString(COL_HORAS, y, formatar_horas_minutos(total_geral))
 
     pdf.save()
     buffer.seek(0)
