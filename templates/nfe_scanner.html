@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Entrada por Nota Fiscal — Estoque MEI{% endblock %}
+
+{% block content %}
+<div class="container py-4" id="conteudo-principal">
+  <h2 class="mb-1"><i class="fas fa-qrcode me-2" aria-hidden="true"></i>Entrada por Nota Fiscal</h2>
+  <p class="text-muted mb-4">Aponte a câmera para o QR Code da NF-e / NFC-e ou faça upload da imagem da nota.</p>
+
+  <!-- Abas: Câmera / Upload -->
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-camera-btn" data-bs-toggle="tab" data-bs-target="#tab-camera" type="button" role="tab" aria-selected="true">
+        <i class="fas fa-camera me-1" aria-hidden="true"></i>Câmera
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-upload-btn" data-bs-toggle="tab" data-bs-target="#tab-upload" type="button" role="tab" aria-selected="false">
+        <i class="fas fa-upload me-1" aria-hidden="true"></i>Upload de imagem
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+    <!-- ABA CÂMERA -->
+    <div class="tab-pane fade show active" id="tab-camera" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body text-center">
+          <div id="camera-container" style="position:relative; max-width:480px; margin:0 auto;">
+            <video id="preview" style="width:100%; border-radius:8px; background:#000;" playsinline autoplay></video>
+            <canvas id="canvas" style="display:none;"></canvas>
+            <div id="scanner-overlay" style="
+              position:absolute; top:50%; left:50%;
+              transform:translate(-50%,-50%);
+              width:200px; height:200px;
+              border:3px solid #0d6efd;
+              border-radius:8px;
+              box-shadow:0 0 0 9999px rgba(0,0,0,0.35);
+              pointer-events:none;">
+            </div>
+          </div>
+          <div class="mt-3">
+            <button class="btn btn-primary me-2" id="btn-start-camera" onclick="iniciarCamera()">
+              <i class="fas fa-play me-1" aria-hidden="true"></i>Iniciar câmera
+            </button>
+            <button class="btn btn-secondary" id="btn-stop-camera" onclick="pararCamera()" style="display:none;">
+              <i class="fas fa-stop me-1" aria-hidden="true"></i>Parar
+            </button>
+          </div>
+          <p class="text-muted mt-2 small" id="camera-status">Clique em "Iniciar câmera" para começar a leitura.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ABA UPLOAD -->
+    <div class="tab-pane fade" id="tab-upload" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <label for="upload-input" class="form-label fw-semibold">Selecione a foto da nota fiscal</label>
+          <input class="form-control" type="file" id="upload-input" accept="image/*" onchange="lerQRUpload(this)" aria-label="Imagem da nota fiscal">
+          <p class="text-muted mt-2 small">A imagem será processada localmente no seu navegador — nenhum arquivo é enviado ao servidor.</p>
+          <canvas id="canvas-upload" style="display:none;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTADO DO QR -->
+  <div id="resultado-qr" class="mt-4" style="display:none;">
+    <div class="alert alert-success">
+      <i class="fas fa-check-circle me-2" aria-hidden="true"></i>
+      <strong>QR Code lido com sucesso!</strong>
+      <div class="mt-1 small text-break" id="url-qr"></div>
+    </div>
+    <div class="text-center">
+      <span class="spinner-border spinner-border-sm me-2" id="spinner-consulta" aria-hidden="true"></span>
+      <span id="status-consulta">Consultando dados na Sefaz...</span>
+    </div>
+  </div>
+
+  <!-- ERRO -->
+  <div id="erro-qr" class="mt-4 alert alert-danger" style="display:none;">
+    <i class="fas fa-exclamation-triangle me-2" aria-hidden="true"></i>
+    <span id="msg-erro"></span>
+  </div>
+</div>
+
+<!-- jsQR para leitura no browser -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+let stream = null;
+let scanLoop = null;
+let jaLeu = false;
+
+async function iniciarCamera() {
+  jaLeu = false;
+  document.getElementById('btn-start-camera').style.display = 'none';
+  document.getElementById('btn-stop-camera').style.display = '';
+  document.getElementById('camera-status').textContent = 'Aponte para o QR Code da nota...';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = document.getElementById('preview');
+    video.srcObject = stream;
+    video.play();
+    video.addEventListener('loadedmetadata', () => { scanLoop = setInterval(escanear, 200); });
+  } catch(e) {
+    document.getElementById('camera-status').textContent = 'Erro ao acessar câmera: ' + e.message;
+    document.getElementById('btn-start-camera').style.display = '';
+    document.getElementById('btn-stop-camera').style.display = 'none';
+  }
+}
+
+function escanear() {
+  if (jaLeu) return;
+  const video = document.getElementById('preview');
+  if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+  if (code && code.data) {
+    jaLeu = true;
+    pararCamera();
+    processarQR(code.data);
+  }
+}
+
+function pararCamera() {
+  if (scanLoop) clearInterval(scanLoop);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  document.getElementById('btn-start-camera').style.display = '';
+  document.getElementById('btn-stop-camera').style.display = 'none';
+  document.getElementById('camera-status').textContent = 'Câmera parada.';
+}
+
+function lerQRUpload(input) {
+  if (!input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.getElementById('canvas-upload');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, img.width, img.height);
+      const code = jsQR(imageData.data, img.width, img.height);
+      if (code && code.data) {
+        processarQR(code.data);
+      } else {
+        mostrarErro('QR Code não encontrado na imagem. Tente uma foto com mais luz e o QR Code bem enquadrado.');
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(input.files[0]);
+}
+
+function processarQR(url) {
+  document.getElementById('resultado-qr').style.display = '';
+  document.getElementById('erro-qr').style.display = 'none';
+  document.getElementById('url-qr').textContent = url;
+  document.getElementById('spinner-consulta').style.display = '';
+  document.getElementById('status-consulta').textContent = 'Consultando dados na Sefaz...';
+
+  fetch('/nfe/consultar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: url })
+  })
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById('spinner-consulta').style.display = 'none';
+    if (data.erro) {
+      mostrarErro(data.erro);
+      document.getElementById('resultado-qr').style.display = 'none';
+    } else {
+      window.location.href = '/nfe/confirmar?token=' + data.token;
+    }
+  })
+  .catch(() => mostrarErro('Erro de conexão ao consultar a nota. Tente novamente.'));
+}
+
+function mostrarErro(msg) {
+  document.getElementById('erro-qr').style.display = '';
+  document.getElementById('msg-erro').textContent = msg;
+  document.getElementById('spinner-consulta').style.display = 'none';
+}
+</script>
+{% endblock %}

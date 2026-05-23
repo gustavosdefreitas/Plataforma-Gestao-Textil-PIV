@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Etiqueta — {{ produto.nome }}{% endblock %}
+
+{% block content %}
+<div class="container py-4" id="conteudo-principal">
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="mb-0 me-3"><i class="fas fa-tag me-2" aria-hidden="true"></i>Etiqueta do Produto</h2>
+    <a href="/produtos" class="btn btn-outline-secondary btn-sm">
+      <i class="fas fa-arrow-left me-1" aria-hidden="true"></i>Voltar
+    </a>
+  </div>
+
+  <div class="row g-4">
+    <!-- Preview da etiqueta -->
+    <div class="col-md-5">
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold">Preview da etiqueta</div>
+        <div class="card-body text-center p-4" style="background:#fff;">
+          <div style="border:2px solid #333; border-radius:6px; padding:16px; display:inline-block; min-width:220px; font-family:monospace;">
+            <div style="font-size:0.75rem; color:#666; text-transform:uppercase; letter-spacing:1px;">{{ empresa_nome }}</div>
+            <div style="font-weight:bold; font-size:1rem; margin:6px 0; max-width:200px; word-break:break-word;">{{ produto.nome }}</div>
+            {% if produto.cor %}<div style="font-size:0.8rem;">Cor: {{ produto.cor }}</div>{% endif %}
+            {% if produto.tamanho %}<div style="font-size:0.8rem;">Tam: {{ produto.tamanho }}</div>{% endif %}
+            <div style="font-size:1.1rem; font-weight:bold; margin:6px 0;">R$ {{ "%.2f"|format(produto.preco) }}</div>
+            <!-- QR Code -->
+            <img src="/produtos/{{ produto.id }}/qrcode.png" alt="QR Code do produto {{ produto.nome }}" style="width:100px; height:100px; margin:8px auto; display:block;">
+            <!-- Código de barras -->
+            <img src="/produtos/{{ produto.id }}/barcode.png" alt="Código de barras do produto {{ produto.nome }}" style="max-width:200px; margin:4px auto; display:block;">
+            <div style="font-size:0.65rem; color:#888; margin-top:2px;">ID: {{ "%08d"|format(produto.id) }}</div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <a href="/produtos/{{ produto.id }}/etiqueta/pdf" class="btn btn-primary w-100" target="_blank">
+            <i class="fas fa-print me-2" aria-hidden="true"></i>Imprimir etiqueta (PDF)
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Info + opções -->
+    <div class="col-md-7">
+      <div class="card shadow-sm mb-3">
+        <div class="card-header fw-semibold">Dados do produto</div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-4">ID interno</dt><dd class="col-sm-8">{{ produto.id }}</dd>
+            <dt class="col-sm-4">Nome</dt><dd class="col-sm-8">{{ produto.nome }}</dd>
+            <dt class="col-sm-4">Cor</dt><dd class="col-sm-8">{{ produto.cor or '—' }}</dd>
+            <dt class="col-sm-4">Tamanho</dt><dd class="col-sm-8">{{ produto.tamanho or '—' }}</dd>
+            <dt class="col-sm-4">Estoque atual</dt><dd class="col-sm-8">{{ produto.quantidade }}</dd>
+            <dt class="col-sm-4">Preço</dt><dd class="col-sm-8">R$ {{ "%.2f"|format(produto.preco) }}</dd>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card shadow-sm">
+        <div class="card-header fw-semibold">Downloads individuais</div>
+        <div class="card-body d-flex gap-2 flex-wrap">
+          <a href="/produtos/{{ produto.id }}/qrcode.png" download class="btn btn-outline-primary">
+            <i class="fas fa-qrcode me-1" aria-hidden="true"></i>QR Code (.png)
+          </a>
+          <a href="/produtos/{{ produto.id }}/barcode.png" download class="btn btn-outline-secondary">
+            <i class="fas fa-barcode me-1" aria-hidden="true"></i>Cód. barras (.png)
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

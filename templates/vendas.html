@@ -55,6 +55,22 @@
 
                     <hr class="my-4">
 
+                    <!-- Scanner de código de barras (leitor USB) -->
+                    <div class="mb-3 p-3 bg-light rounded border">
+                        <label for="scan-input" class="form-label fw-bold">
+                            <i class="fas fa-barcode me-2" aria-hidden="true"></i>Leitura por Código de Barras
+                        </label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-barcode"></i></span>
+                            <input type="text" id="scan-input" class="form-control"
+                                   placeholder="Aponte o leitor USB aqui e escaneie o produto..."
+                                   aria-label="Campo para leitura de código de barras"
+                                   autocomplete="off">
+                            <span class="input-group-text text-muted small" id="scan-status">Aguardando...</span>
+                        </div>
+                        <div id="scan-feedback" class="mt-2 d-none alert alert-info py-2 mb-0"></div>
+                    </div>
+
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="fw-bold mb-0">
                             <i class="fas fa-box me-2" aria-hidden="true"></i>Itens da venda
@@ -178,6 +194,88 @@
 </div>
 
 <script>
+// ── Scanner USB ──────────────────────────────────────────────
+(function () {
+    const scanInput = document.getElementById('scan-input');
+    const scanStatus = document.getElementById('scan-status');
+    const scanFeedback = document.getElementById('scan-feedback');
+
+    if (!scanInput) return;
+
+    let debounceTimer;
+
+    scanInput.addEventListener('input', function () {
+        clearTimeout(debounceTimer);
+        const codigo = this.value.trim();
+        if (!codigo) return;
+
+        // Leitor USB termina com Enter ou após breve pausa sem mais input
+        debounceTimer = setTimeout(() => buscarProduto(codigo), 250);
+    });
+
+    scanInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(debounceTimer);
+            const codigo = this.value.trim();
+            if (codigo) buscarProduto(codigo);
+        }
+    });
+
+    async function buscarProduto(codigo) {
+        scanStatus.textContent = 'Buscando...';
+        scanFeedback.classList.add('d-none');
+        scanFeedback.className = 'mt-2 alert py-2 mb-0';
+
+        try {
+            const resp = await fetch(`/api/produto/scan/${encodeURIComponent(codigo)}`);
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                scanStatus.textContent = 'Não encontrado';
+                scanFeedback.textContent = data.erro || 'Produto não encontrado.';
+                scanFeedback.classList.add('alert-danger');
+                scanFeedback.classList.remove('d-none');
+                scanInput.value = '';
+                return;
+            }
+
+            // Selecionar produto no primeiro select disponível
+            const selects = document.querySelectorAll('#itens-venda select[name="produto_id"]');
+            let selecionado = false;
+            for (const sel of selects) {
+                const opt = [...sel.options].find(o => o.value == data.id);
+                if (opt) {
+                    sel.value = data.id;
+                    selecionado = true;
+                    break;
+                }
+            }
+
+            if (!selecionado) {
+                // Produto existe mas não está listado (empresa diferente?)
+                scanFeedback.textContent = `Produto "${data.nome}" encontrado mas não disponível para esta empresa.`;
+                scanFeedback.classList.add('alert-warning');
+            } else {
+                scanStatus.textContent = 'OK';
+                scanFeedback.textContent = `✓ ${data.nome} — R$ ${data.preco.toFixed(2)} — Estoque: ${data.quantidade}`;
+                scanFeedback.classList.add('alert-success');
+            }
+
+            scanFeedback.classList.remove('d-none');
+            scanInput.value = '';
+            scanInput.focus();
+        } catch (err) {
+            scanStatus.textContent = 'Erro';
+            scanFeedback.textContent = 'Erro de conexão ao buscar produto.';
+            scanFeedback.classList.add('alert-danger');
+            scanFeedback.classList.remove('d-none');
+            scanInput.value = '';
+        }
+    }
+})();
+
+// ── Itens da venda ───────────────────────────────────────────
 function adicionarItem() {
     const container = document.getElementById("itens-venda");
     const primeiroItem = container.querySelector(".item-venda");

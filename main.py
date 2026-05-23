@@ -3,7 +3,18 @@ from fastapi import FastAPI, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from io import BytesIO, StringIO
 import csv
+import json
+import re
+import tempfile
+import base64
+import qrcode
+import barcode
+from barcode.writer import ImageWriter
+from bs4 import BeautifulSoup
+import httpx
+from PIL import Image
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -2340,6 +2351,678 @@ async def api_listar_produtos(request: Request, empresa_id: int):
 
     return {"empresa_id": empresa_id, "estoque": estoque}
 
+
+# ─────────────────────────────────────────────────────────────
+#  NF-e QR Code Reader
+# ─────────────────────────────────────────────────────────────
+
+# Token store em memória (UUID → dados parseados da NF-e)
+nfe_cache: dict = {}
+
+
+def gerar_qrcode_bytes(conteudo: str, size: int = 200) -> bytes:
+    """Retorna PNG do QR Code em bytes."""
+    qr = qrcode.QRCode(box_size=4, border=2)
+    qr.add_data(conteudo)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def gerar_barcode_bytes(codigo: str) -> bytes:
+    """Retorna PNG do Code-128 em bytes."""
+    CODE128 = barcode.get_barcode_class("code128")
+    buf = BytesIO()
+    CODE128(codigo, writer=ImageWriter()).write(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _texto_limpo(tag) -> str:
+    return tag.get_text(separator=" ", strip=True) if tag else ""
+
+
+def consultar_sefaz_url(url: str) -> dict:
+    """
+    Faz GET na URL da NF-e (embutida no QR Code) e extrai:
+      - fornecedor: cnpj, razao_social
+      - itens: descricao, codigo, quantidade, preco_unitario
+    Tenta múltiplos seletores pois o layout varia por estado.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        )
+    }
+    try:
+        with httpx.Client(follow_redirects=True, timeout=15) as client:
+            resp = client.get(url, headers=headers)
+            resp.raise_for_status()
+            html = resp.text
+    except Exception as e:
+        raise ValueError(f"Erro ao acessar URL Sefaz: {e}")
+
+    soup = BeautifulSoup(html, "lxml")
+
+    # ── Emitente ──────────────────────────────────────────────
+    cnpj = ""
+    razao_social = ""
+
+    # Padrão 1: tabela com label "CNPJ"
+    for td in soup.find_all("td"):
+        txt = td.get_text(strip=True)
+        if "CNPJ" in txt and not cnpj:
+            nxt = td.find_next_sibling("td")
+            if nxt:
+                cnpj = re.sub(r"\D", "", nxt.get_text(strip=True))
+        if any(k in txt for k in ["Razão Social", "Razao Social", "RAZÃO SOCIAL", "EMITENTE"]):
+            nxt = td.find_next_sibling("td")
+            if nxt and not razao_social:
+                razao_social = nxt.get_text(strip=True)
+
+    # Padrão 2: divs / spans com atributo ou classe
+    if not cnpj:
+        for tag in soup.find_all(["span", "div", "p"]):
+            txt = tag.get_text(strip=True)
+            m = re.search(r"\d{2}[\.\s]?\d{3}[\.\s]?\d{3}[\/\s]?\d{4}[-\s]?\d{2}", txt)
+            if m:
+                cnpj = re.sub(r"\D", "", m.group())
+                break
+
+    # Padrão 3: texto bruto
+    if not cnpj:
+        m = re.search(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", html)
+        if m:
+            cnpj = re.sub(r"\D", "", m.group())
+
+    if not razao_social:
+        # tenta pegar o primeiro <h4> ou <strong> grande
+        for tag in soup.find_all(["h4", "h3", "h2", "strong", "b"]):
+            t = tag.get_text(strip=True)
+            if len(t) > 5 and not any(c.isdigit() for c in t[:3]):
+                razao_social = t
+                break
+
+    # ── Itens ─────────────────────────────────────────────────
+    itens = []
+
+    # Padrão 1: tabela com cabeçalho contendo "Descrição" / "Qtde" / "Valor"
+    tabelas = soup.find_all("table")
+    for tabela in tabelas:
+        headers_row = tabela.find("tr")
+        if not headers_row:
+            continue
+        ths = [th.get_text(strip=True).lower() for th in headers_row.find_all(["th", "td"])]
+        if not any("desc" in h for h in ths):
+            continue
+        # mapear índices
+        idx_desc = next((i for i, h in enumerate(ths) if "desc" in h), None)
+        idx_cod  = next((i for i, h in enumerate(ths) if "cod" in h), None)
+        idx_qtd  = next((i for i, h in enumerate(ths) if h in ("qtd", "qtde", "quant", "quantidade")), None)
+        idx_vun  = next((i for i, h in enumerate(ths) if "unit" in h or "v.unit" in h or "vl.unit" in h), None)
+        idx_vtot = next((i for i, h in enumerate(ths) if "total" in h or "v.total" in h), None)
+
+        for tr in tabela.find_all("tr")[1:]:
+            cols = tr.find_all(["td", "th"])
+            if not cols:
+                continue
+            def col(i):
+                if i is None or i >= len(cols):
+                    return ""
+                return cols[i].get_text(strip=True)
+
+            desc = col(idx_desc)
+            if not desc:
+                continue
+            cod  = col(idx_cod)
+            qtd_txt  = col(idx_qtd).replace(",", ".")
+            vun_txt  = col(idx_vun).replace("R$", "").replace(".", "").replace(",", ".").strip()
+            vtot_txt = col(idx_vtot).replace("R$", "").replace(".", "").replace(",", ".").strip()
+
+            try:
+                qtd = float(qtd_txt) if qtd_txt else 1.0
+            except ValueError:
+                qtd = 1.0
+            try:
+                vun = float(vun_txt)
+            except ValueError:
+                try:
+                    vun = float(vtot_txt) / qtd if qtd else 0.0
+                except Exception:
+                    vun = 0.0
+
+            itens.append({
+                "descricao": desc,
+                "codigo": cod,
+                "quantidade": qtd,
+                "preco_unitario": round(vun, 2),
+            })
+        if itens:
+            break
+
+    # Padrão 2: linhas com classe contendo "item"
+    if not itens:
+        for row in soup.find_all(class_=re.compile(r"item", re.I)):
+            tds = row.find_all(["td", "span", "div"])
+            if len(tds) >= 3:
+                desc = _texto_limpo(tds[0])
+                qtd_txt = _texto_limpo(tds[1]).replace(",", ".")
+                val_txt = _texto_limpo(tds[-1]).replace("R$", "").replace(".", "").replace(",", ".").strip()
+                try:
+                    qtd = float(qtd_txt)
+                except Exception:
+                    qtd = 1.0
+                try:
+                    vun = float(val_txt)
+                except Exception:
+                    vun = 0.0
+                itens.append({"descricao": desc, "codigo": "", "quantidade": qtd, "preco_unitario": round(vun, 2)})
+
+    return {
+        "fornecedor": {"cnpj": cnpj, "razao_social": razao_social},
+        "itens": itens,
+    }
+
+
+# ── Rotas NF-e ────────────────────────────────────────────────
+
+@app.get("/nfe/scanner", response_class=HTMLResponse)
+async def nfe_scanner_page(request: Request):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse("nfe_scanner.html", {"request": request, "user": user})
+
+
+@app.post("/nfe/consultar")
+async def nfe_consultar(request: Request, url_nfe: str = Form(...)):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+
+    try:
+        dados = consultar_sefaz_url(url_nfe)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"erro": str(e)})
+
+    if not dados["fornecedor"]["cnpj"]:
+        return JSONResponse(status_code=422, content={"erro": "Não foi possível extrair o CNPJ da nota fiscal."})
+
+    token = str(uuid.uuid4())
+    nfe_cache[token] = dados
+
+    return RedirectResponse(f"/nfe/confirmar?token={token}", status_code=303)
+
+
+@app.get("/nfe/confirmar", response_class=HTMLResponse)
+async def nfe_confirmar_page(request: Request, token: str):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse("/", status_code=302)
+
+    dados = nfe_cache.get(token)
+    if not dados:
+        return RedirectResponse("/nfe/scanner?msg=token_invalido", status_code=302)
+
+    cnpj = re.sub(r"\D", "", dados["fornecedor"]["cnpj"])
+
+    with engine.connect() as conn:
+        # Verificar se fornecedor já existe
+        forn = conn.execute(
+            text("SELECT id, razao_social FROM fornecedores WHERE cnpj = :cnpj"),
+            {"cnpj": cnpj}
+        ).fetchone()
+        fornecedor_existente = forn is not None
+
+        # Listar empresas para o usuário selecionar a empresa destino
+        empresas = conn.execute(
+            text("SELECT id, nome FROM empresas ORDER BY nome")
+        ).fetchall()
+
+        # Para cada item, verificar se produto já existe (busca por nome aproximado)
+        empresa_padrao_id = empresas[0].id if empresas else None
+        itens_com_status = []
+        for item in dados["itens"]:
+            prod = None
+            if empresa_padrao_id:
+                prod = conn.execute(
+                    text("""
+                        SELECT id, nome, quantidade, preco
+                        FROM produtos
+                        WHERE empresa_id = :eid
+                          AND LOWER(nome) LIKE LOWER(:busca)
+                        LIMIT 1
+                    """),
+                    {"eid": empresa_padrao_id, "busca": f"%{item['descricao'][:20]}%"}
+                ).fetchone()
+
+            itens_com_status.append({
+                **item,
+                "nome_sugerido": item["descricao"],
+                "produto_existente": prod is not None,
+                "produto_id": prod.id if prod else None,
+            })
+
+    dados_view = {**dados, "itens": itens_com_status}
+
+    return templates.TemplateResponse("nfe_confirmar.html", {
+        "request": request,
+        "user": user,
+        "token": token,
+        "dados": dados_view,
+        "fornecedor_existente": fornecedor_existente,
+        "empresas": [{"id": e.id, "nome": e.nome} for e in empresas],
+    })
+
+
+class NfeSalvarPayload(BaseModel):
+    token: str
+    empresa_id: int
+    fornecedor_nome: str
+    fornecedor_cnpj: str
+    itens: list  # lista de dicts com produto_id/nome/quantidade/preco
+
+
+@app.post("/nfe/salvar")
+async def nfe_salvar(request: Request, payload: NfeSalvarPayload):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+
+    dados_cache = nfe_cache.get(payload.token)
+    if not dados_cache:
+        return JSONResponse(status_code=400, content={"erro": "Token expirado ou inválido."})
+
+    cnpj_limpo = re.sub(r"\D", "", payload.fornecedor_cnpj)
+    resultados = []
+
+    with engine.connect() as conn:
+        # ── Fornecedor ──────────────────────────────────────────
+        forn = conn.execute(
+            text("SELECT id FROM fornecedores WHERE cnpj = :cnpj"),
+            {"cnpj": cnpj_limpo}
+        ).fetchone()
+
+        if forn:
+            fornecedor_id = forn.id
+            conn.execute(
+                text("""
+                    UPDATE fornecedores
+                    SET razao_social = :nome
+                    WHERE id = :id
+                """),
+                {"nome": payload.fornecedor_nome, "id": fornecedor_id}
+            )
+        else:
+            r = conn.execute(
+                text("""
+                    INSERT INTO fornecedores (razao_social, cnpj, situacao_cadastral, criado_em)
+                    VALUES (:nome, :cnpj, 'Ativo', NOW())
+                    RETURNING id
+                """),
+                {"nome": payload.fornecedor_nome, "cnpj": cnpj_limpo}
+            )
+            fornecedor_id = r.fetchone().id
+
+        # ── Itens ───────────────────────────────────────────────
+        for item in payload.itens:
+            produto_id = item.get("produto_id")
+            nome = item.get("nome", "").strip()
+            qtd = float(item.get("quantidade", 1))
+            preco = float(item.get("preco_unitario", 0))
+
+            if produto_id:
+                # Produto existente → incrementar estoque
+                conn.execute(
+                    text("""
+                        UPDATE produtos
+                        SET quantidade = quantidade + :qtd,
+                            fornecedor_id = :fid
+                        WHERE id = :pid
+                    """),
+                    {"qtd": qtd, "fid": fornecedor_id, "pid": produto_id}
+                )
+                resultados.append({"acao": "estoque_atualizado", "nome": nome, "produto_id": produto_id})
+            else:
+                # Produto novo → criar
+                r2 = conn.execute(
+                    text("""
+                        INSERT INTO produtos (nome, quantidade, preco, empresa_id, fornecedor_id, criado_em)
+                        VALUES (:nome, :qtd, :preco, :eid, :fid, NOW())
+                        RETURNING id
+                    """),
+                    {
+                        "nome": nome,
+                        "qtd": qtd,
+                        "preco": preco,
+                        "eid": payload.empresa_id,
+                        "fid": fornecedor_id,
+                    }
+                )
+                novo_id = r2.fetchone().id
+                resultados.append({"acao": "produto_criado", "nome": nome, "produto_id": novo_id})
+
+        conn.commit()
+
+    # Liberar cache
+    nfe_cache.pop(payload.token, None)
+
+    # Log
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO logs_sistema (usuario_id, acao, detalhes, criado_em)
+                    VALUES (:uid, 'nfe_entrada', :det, NOW())
+                """),
+                {"uid": user.id, "det": json.dumps({"fornecedor_id": fornecedor_id, "itens": len(resultados)})}
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+    return JSONResponse({"ok": True, "fornecedor_id": fornecedor_id, "itens": resultados})
+
+
+# ─────────────────────────────────────────────────────────────
+#  Etiquetas: QR Code + Code-128 por produto
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/produtos/{produto_id}/qrcode.png")
+async def produto_qrcode(request: Request, produto_id: int):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"erro": "Não autenticado"})
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("SELECT id, nome, preco FROM produtos WHERE id = :id"),
+            {"id": produto_id}
+        ).fetchone()
+
+    if not prod:
+        return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+    conteudo = json.dumps({"id": prod.id, "nome": prod.nome, "preco": float(prod.preco)}, ensure_ascii=False)
+    png_bytes = gerar_qrcode_bytes(conteudo)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/produtos/{produto_id}/barcode.png")
+async def produto_barcode(request: Request, produto_id: int):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"erro": "Não autenticado"})
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("SELECT id FROM produtos WHERE id = :id"),
+            {"id": produto_id}
+        ).fetchone()
+
+    if not prod:
+        return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+    codigo = str(prod.id).zfill(8)
+    png_bytes = gerar_barcode_bytes(codigo)
+    return Response(content=png_bytes, media_type="image/png")
+
+
+@app.get("/produtos/{produto_id}/etiqueta", response_class=HTMLResponse)
+async def produto_etiqueta_page(request: Request, produto_id: int):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse("/", status_code=302)
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("""
+                SELECT p.id, p.nome, p.quantidade, p.preco, p.cor, p.tamanho,
+                       e.nome AS empresa_nome
+                FROM produtos p
+                JOIN empresas e ON e.id = p.empresa_id
+                WHERE p.id = :id
+            """),
+            {"id": produto_id}
+        ).fetchone()
+
+    if not prod:
+        return RedirectResponse("/produtos?erro=nao_encontrado", status_code=302)
+
+    return templates.TemplateResponse("produto_etiqueta.html", {
+        "request": request,
+        "user": user,
+        "produto": prod,
+        "empresa_nome": prod.empresa_nome,
+    })
+
+
+@app.get("/produtos/{produto_id}/etiqueta/pdf")
+async def produto_etiqueta_pdf(request: Request, produto_id: int):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("""
+                SELECT p.id, p.nome, p.preco, p.cor, p.tamanho,
+                       e.nome AS empresa_nome
+                FROM produtos p
+                JOIN empresas e ON e.id = p.empresa_id
+                WHERE p.id = :id
+            """),
+            {"id": produto_id}
+        ).fetchone()
+
+    if not prod:
+        return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+    codigo = str(prod.id).zfill(8)
+    qr_bytes  = gerar_qrcode_bytes(json.dumps({"id": prod.id, "nome": prod.nome, "preco": float(prod.preco)}, ensure_ascii=False))
+    bar_bytes = gerar_barcode_bytes(codigo)
+
+    # Salvar imagens temporárias para o ReportLab
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f_qr:
+        f_qr.write(qr_bytes)
+        qr_path = f_qr.name
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f_bar:
+        f_bar.write(bar_bytes)
+        bar_path = f_bar.name
+
+    try:
+        # A6 landscape: 148mm x 105mm
+        W, H = 148 * mm, 105 * mm
+        buf = BytesIO()
+        pdf = canvas.Canvas(buf, pagesize=(W, H))
+
+        # Cabeçalho: nome da empresa
+        pdf.setFont("Helvetica-Bold", 9)
+        pdf.drawCentredString(W / 2, H - 8 * mm, prod.empresa_nome[:40])
+
+        # Nome do produto
+        pdf.setFont("Helvetica-Bold", 11)
+        nome_display = prod.nome[:35]
+        pdf.drawCentredString(W / 2, H - 16 * mm, nome_display)
+
+        # Cor / Tamanho
+        if prod.cor or prod.tamanho:
+            extras = []
+            if prod.cor:
+                extras.append(f"Cor: {prod.cor}")
+            if prod.tamanho:
+                extras.append(f"Tam: {prod.tamanho}")
+            pdf.setFont("Helvetica", 8)
+            pdf.drawCentredString(W / 2, H - 22 * mm, "  |  ".join(extras))
+
+        # QR Code (lado esquerdo)
+        qr_size = 45 * mm
+        pdf.drawImage(qr_path, 6 * mm, H - 22 * mm - qr_size, width=qr_size, height=qr_size)
+
+        # Preço
+        pdf.setFont("Helvetica-Bold", 18)
+        pdf.drawCentredString(W * 0.65, H - 38 * mm, f"R$ {prod.preco:.2f}")
+
+        # Código
+        pdf.setFont("Helvetica", 8)
+        pdf.drawCentredString(W * 0.65, H - 46 * mm, f"Cód: {codigo}")
+
+        # Barcode (parte inferior)
+        bar_w, bar_h = 90 * mm, 22 * mm
+        pdf.drawImage(bar_path, (W - bar_w) / 2, 6 * mm, width=bar_w, height=bar_h)
+
+        pdf.save()
+        buf.seek(0)
+    finally:
+        os.unlink(qr_path)
+        os.unlink(bar_path)
+
+    nome_arquivo = f"etiqueta_produto_{codigo}.pdf"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={nome_arquivo}"}
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+#  API scan de produto (leitor USB via JS no vendas.html)
+# ─────────────────────────────────────────────────────────────
+
+@app.get("/api/produto/scan/{codigo}")
+async def api_scan_produto(request: Request, codigo: str):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"erro": "Não autenticado"})
+
+    # Código pode ser o ID zero-padded (ex: "00000042") ou o ID direto
+    codigo_limpo = codigo.lstrip("0") or "0"
+    try:
+        produto_id = int(codigo_limpo)
+    except ValueError:
+        return JSONResponse(status_code=404, content={"erro": "Código inválido"})
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("""
+                SELECT p.id, p.nome, p.preco, p.quantidade, p.cor, p.tamanho,
+                       e.nome AS empresa_nome, e.id AS empresa_id
+                FROM produtos p
+                JOIN empresas e ON e.id = p.empresa_id
+                WHERE p.id = :id
+            """),
+            {"id": produto_id}
+        ).fetchone()
+
+    if not prod:
+        return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+    return JSONResponse({
+        "id": prod.id,
+        "nome": prod.nome,
+        "preco": float(prod.preco),
+        "quantidade": float(prod.quantidade),
+        "cor": prod.cor,
+        "tamanho": prod.tamanho,
+        "empresa_id": prod.empresa_id,
+        "empresa_nome": prod.empresa_nome,
+    })
+
+
+# ─────────────────────────────────────────────────────────────
+#  API ESP32 — venda via scanner IoT
+# ─────────────────────────────────────────────────────────────
+
+class VendaScannerPayload(BaseModel):
+    codigo: str
+    session_key: str
+    quantidade: float = 1.0
+    cliente_nome: str = "Balcão"
+
+
+@app.post("/api/venda/scanner")
+async def api_venda_scanner(payload: VendaScannerPayload):
+    """
+    Endpoint para ESP32 + leitor de barcode.
+    Autentica via session_key, localiza produto pelo código,
+    registra venda e retorna JSON de confirmação.
+    """
+    # Autenticar via session_key (SHA-256 armazenado em usuarios.session_id)
+    with engine.connect() as conn:
+        usuario = conn.execute(
+            text("SELECT id, nome, perfil FROM usuarios WHERE session_id = :sk"),
+            {"sk": payload.session_key}
+        ).fetchone()
+
+    if not usuario:
+        return JSONResponse(status_code=401, content={"erro": "session_key inválida"})
+
+    codigo_limpo = payload.codigo.lstrip("0") or "0"
+    try:
+        produto_id = int(codigo_limpo)
+    except ValueError:
+        return JSONResponse(status_code=404, content={"erro": "Código inválido"})
+
+    with engine.connect() as conn:
+        prod = conn.execute(
+            text("""
+                SELECT id, nome, preco, quantidade, empresa_id
+                FROM produtos
+                WHERE id = :id
+            """),
+            {"id": produto_id}
+        ).fetchone()
+
+        if not prod:
+            return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+        if prod.quantidade < payload.quantidade:
+            return JSONResponse(status_code=409, content={"erro": "Estoque insuficiente"})
+
+        # Registrar venda
+        grupo = str(uuid.uuid4())
+        num_venda = conn.execute(text("SELECT nextval('seq_numero_venda')")).scalar()
+
+        conn.execute(
+            text("""
+                INSERT INTO vendas
+                  (produto_id, empresa_id, quantidade, preco_unitario,
+                   cliente_nome, tipo_documento, grupo_venda, numero_venda, data_venda)
+                VALUES
+                  (:pid, :eid, :qtd, :preco,
+                   :cliente, 'CPF', :grupo, :num, NOW())
+            """),
+            {
+                "pid": prod.id,
+                "eid": prod.empresa_id,
+                "qtd": payload.quantidade,
+                "preco": float(prod.preco),
+                "cliente": payload.cliente_nome,
+                "grupo": grupo,
+                "num": num_venda,
+            }
+        )
+
+        # Atualizar estoque
+        conn.execute(
+            text("UPDATE produtos SET quantidade = quantidade - :qtd WHERE id = :id"),
+            {"qtd": payload.quantidade, "id": prod.id}
+        )
+        conn.commit()
+
+    return JSONResponse({
+        "ok": True,
+        "numero_venda": num_venda,
+        "produto": prod.nome,
+        "preco_unitario": float(prod.preco),
+        "quantidade": payload.quantidade,
+        "total": round(float(prod.preco) * payload.quantidade, 2),
+    })
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
