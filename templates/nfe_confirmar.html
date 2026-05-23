@@ -6,7 +6,7 @@
   <h2 class="mb-1"><i class="fas fa-file-invoice me-2" aria-hidden="true"></i>Confirmar Entrada por NF-e</h2>
   <p class="text-muted mb-4">Verifique os dados extraídos da nota antes de salvar.</p>
 
-  <form method="POST" action="/nfe/salvar">
+  <form method="POST" action="/nfe/salvar" id="form-nfe">
     <input type="hidden" name="token" value="{{ token }}">
 
     <!-- FORNECEDOR -->
@@ -68,72 +68,75 @@
 
     <!-- ITENS DA NOTA -->
     <div class="card shadow-sm mb-4">
-      <div class="card-header bg-success text-white fw-semibold">
-        <i class="fas fa-boxes me-2" aria-hidden="true"></i>Itens da Nota ({{ dados.itens | length }} produto(s))
+      <div class="card-header bg-success text-white fw-semibold d-flex justify-content-between align-items-center">
+        <span>
+          <i class="fas fa-boxes me-2" aria-hidden="true"></i>
+          Itens da Nota
+          <span class="badge bg-white text-success ms-2" id="badge-total">{{ dados.itens | length }}</span>
+        </span>
+        <button type="button" class="btn btn-sm btn-light" onclick="adicionarItem()" aria-label="Adicionar item manualmente">
+          <i class="fas fa-plus me-1" aria-hidden="true"></i>Adicionar item
+        </button>
       </div>
-      <div class="card-body p-0">
-        <div class="table-responsive">
-          <table class="table table-hover mb-0" aria-label="Itens da nota fiscal">
-            <caption class="visually-hidden">Lista de produtos extraídos da nota fiscal</caption>
-            <thead class="table-light">
-              <tr>
-                <th scope="col">#</th>
-                <th scope="col">Descrição (da nota)</th>
-                <th scope="col">Nome no sistema</th>
-                <th scope="col">Qtd</th>
-                <th scope="col">Vlr Unit.</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for item in dados.itens %}
-              <tr>
-                <td>{{ loop.index }}</td>
-                <td><small class="text-muted">{{ item.descricao }}</small></td>
-                <td>
-                  <input type="text" class="form-control form-control-sm"
-                    name="item_nome_{{ loop.index0 }}"
-                    value="{{ item.nome_sugerido }}"
-                    placeholder="Nome no sistema"
-                    aria-label="Nome do produto {{ loop.index }} no sistema"
-                    aria-required="true">
-                  <input type="hidden" name="item_codigo_{{ loop.index0 }}" value="{{ item.codigo }}">
-                  <input type="hidden" name="item_qtd_original_{{ loop.index0 }}" value="{{ item.quantidade }}">
-                </td>
-                <td>
-                  <input type="number" step="0.01" class="form-control form-control-sm" style="width:80px"
-                    name="item_qtd_{{ loop.index0 }}"
-                    value="{{ item.quantidade }}"
-                    aria-label="Quantidade do produto {{ loop.index }}">
-                </td>
-                <td>
-                  <input type="number" step="0.01" class="form-control form-control-sm" style="width:90px"
-                    name="item_preco_{{ loop.index0 }}"
-                    value="{{ item.preco_unitario }}"
-                    aria-label="Preço unitário do produto {{ loop.index }}">
-                </td>
-                <td>
-                  {% if item.produto_existente %}
-                    <span class="badge bg-info text-dark">
-                      <i class="fas fa-plus me-1" aria-hidden="true"></i>Acrescenta estoque
-                    </span>
-                  {% else %}
-                    <span class="badge bg-warning text-dark">
-                      <i class="fas fa-star me-1" aria-hidden="true"></i>Novo produto
-                    </span>
-                  {% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        <input type="hidden" name="total_itens" value="{{ dados.itens | length }}">
+
+      {% if dados.itens | length == 0 %}
+      <div class="alert alert-warning m-3 mb-0 py-2">
+        <i class="fas fa-info-circle me-1" aria-hidden="true"></i>
+        Os itens desta nota não foram extraídos automaticamente (NF-e modelo 55 exige JavaScript no portal da Sefaz).
+        Adicione os produtos manualmente clicando em <strong>Adicionar item</strong>.
       </div>
+      {% endif %}
+
+      <div class="table-responsive">
+        <table class="table table-hover mb-0" aria-label="Itens da nota fiscal">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" style="width:36px">#</th>
+              <th scope="col">Nome no sistema</th>
+              <th scope="col" style="width:90px">Qtd</th>
+              <th scope="col" style="width:110px">Vlr Unit. (R$)</th>
+              <th scope="col" style="width:36px"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody-itens">
+            {% for item in dados.itens %}
+            <tr class="item-row">
+              <td class="text-muted small num-col">{{ loop.index }}</td>
+              <td>
+                <input type="text" class="form-control form-control-sm"
+                  name="item_nome_{{ loop.index0 }}"
+                  value="{{ item.nome_sugerido }}"
+                  placeholder="Nome do produto no sistema"
+                  required aria-required="true">
+              </td>
+              <td>
+                <input type="number" step="0.01" min="0.01" class="form-control form-control-sm"
+                  name="item_qtd_{{ loop.index0 }}"
+                  value="{{ item.quantidade }}"
+                  required>
+              </td>
+              <td>
+                <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                  name="item_preco_{{ loop.index0 }}"
+                  value="{{ item.preco_unitario }}">
+              </td>
+              <td>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removerItem(this)" title="Remover item" aria-label="Remover item">
+                  <i class="fas fa-trash" aria-hidden="true"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Contador oculto — atualizado pelo JS antes do submit -->
+      <input type="hidden" name="total_itens" id="total_itens" value="{{ dados.itens | length }}">
     </div>
 
     <div class="d-flex gap-2">
-      <button type="submit" class="btn btn-success btn-lg">
+      <button type="submit" class="btn btn-success btn-lg" onclick="return prepararEnvio()">
         <i class="fas fa-check me-2" aria-hidden="true"></i>Confirmar e salvar entrada
       </button>
       <a href="/nfe/scanner" class="btn btn-outline-secondary btn-lg">
@@ -142,4 +145,74 @@
     </div>
   </form>
 </div>
+
+<script>
+let contadorItens = {{ dados.itens | length }};
+
+function atualizarNumeracao() {
+  const rows = document.querySelectorAll('#tbody-itens .item-row');
+  rows.forEach((tr, i) => {
+    // Renumerar campos
+    tr.querySelectorAll('input').forEach(inp => {
+      inp.name = inp.name.replace(/_\d+$/, `_${i}`);
+    });
+    // Renumerar coluna #
+    const num = tr.querySelector('.num-col');
+    if (num) num.textContent = i + 1;
+  });
+  const total = rows.length;
+  document.getElementById('total_itens').value = total;
+  document.getElementById('badge-total').textContent = total;
+}
+
+function adicionarItem() {
+  const tbody = document.getElementById('tbody-itens');
+  const idx   = tbody.querySelectorAll('.item-row').length;
+
+  const tr = document.createElement('tr');
+  tr.className = 'item-row';
+  tr.innerHTML = `
+    <td class="text-muted small num-col">${idx + 1}</td>
+    <td>
+      <input type="text" class="form-control form-control-sm"
+        name="item_nome_${idx}" placeholder="Nome do produto no sistema" required>
+    </td>
+    <td>
+      <input type="number" step="0.01" min="0.01" class="form-control form-control-sm"
+        name="item_qtd_${idx}" value="1" required>
+    </td>
+    <td>
+      <input type="number" step="0.01" min="0" class="form-control form-control-sm"
+        name="item_preco_${idx}" value="0.00">
+    </td>
+    <td>
+      <button type="button" class="btn btn-sm btn-outline-danger"
+        onclick="removerItem(this)" title="Remover" aria-label="Remover item">
+        <i class="fas fa-trash" aria-hidden="true"></i>
+      </button>
+    </td>`;
+
+  tbody.appendChild(tr);
+  atualizarNumeracao();
+
+  // Focar no campo nome do novo item
+  tr.querySelector('input[type="text"]').focus();
+}
+
+function removerItem(btn) {
+  const tr = btn.closest('tr');
+  tr.remove();
+  atualizarNumeracao();
+}
+
+function prepararEnvio() {
+  const rows = document.querySelectorAll('#tbody-itens .item-row');
+  if (rows.length === 0) {
+    alert('Adicione pelo menos um item antes de salvar.');
+    return false;
+  }
+  atualizarNumeracao();
+  return true;
+}
+</script>
 {% endblock %}
