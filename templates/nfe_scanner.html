@@ -4,49 +4,58 @@
 {% block content %}
 <div class="container py-4" id="conteudo-principal">
   <h2 class="mb-1"><i class="fas fa-qrcode me-2" aria-hidden="true"></i>Entrada por Nota Fiscal</h2>
-  <p class="text-muted mb-4">Aponte a câmera para o QR Code da NF-e / NFC-e ou faça upload da imagem da nota.</p>
+  <p class="text-muted mb-4">Leia o QR Code, o código de barras ou informe a chave de acesso da nota.</p>
 
-  <!-- Abas: Câmera / Upload -->
+  <!-- Abas -->
   <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="tab-camera-btn" data-bs-toggle="tab" data-bs-target="#tab-camera" type="button" role="tab" aria-selected="true">
-        <i class="fas fa-camera me-1" aria-hidden="true"></i>Câmera
+      <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-camera" type="button" role="tab" aria-selected="true">
+        <i class="fas fa-camera me-1" aria-hidden="true"></i>Câmera (QR / Barcode)
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-upload-btn" data-bs-toggle="tab" data-bs-target="#tab-upload" type="button" role="tab" aria-selected="false">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-upload" type="button" role="tab" aria-selected="false">
         <i class="fas fa-upload me-1" aria-hidden="true"></i>Upload de imagem
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-chave" type="button" role="tab" aria-selected="false">
+        <i class="fas fa-keyboard me-1" aria-hidden="true"></i>Chave de acesso
       </button>
     </li>
   </ul>
 
   <div class="tab-content">
-    <!-- ABA CÂMERA -->
+
+    <!-- ABA CÂMERA (QR Code via jsQR + Code 39/128 via ZXing) -->
     <div class="tab-pane fade show active" id="tab-camera" role="tabpanel">
       <div class="card shadow-sm">
         <div class="card-body text-center">
           <div id="camera-container" style="position:relative; max-width:480px; margin:0 auto;">
-            <video id="preview" style="width:100%; border-radius:8px; background:#000;" playsinline autoplay></video>
+            <video id="preview" style="width:100%; border-radius:8px; background:#000;" playsinline autoplay muted></video>
             <canvas id="canvas" style="display:none;"></canvas>
-            <div id="scanner-overlay" style="
+            <!-- Guia visual de enquadramento -->
+            <div style="
               position:absolute; top:50%; left:50%;
               transform:translate(-50%,-50%);
-              width:200px; height:200px;
+              width:260px; height:160px;
               border:3px solid #0d6efd;
               border-radius:8px;
               box-shadow:0 0 0 9999px rgba(0,0,0,0.35);
               pointer-events:none;">
             </div>
           </div>
-          <div class="mt-3">
-            <button class="btn btn-primary me-2" id="btn-start-camera" onclick="iniciarCamera()">
+          <div class="mt-3 d-flex justify-content-center gap-2">
+            <button class="btn btn-primary" id="btn-start-camera" onclick="iniciarCamera()">
               <i class="fas fa-play me-1" aria-hidden="true"></i>Iniciar câmera
             </button>
             <button class="btn btn-secondary" id="btn-stop-camera" onclick="pararCamera()" style="display:none;">
               <i class="fas fa-stop me-1" aria-hidden="true"></i>Parar
             </button>
           </div>
-          <p class="text-muted mt-2 small" id="camera-status">Clique em "Iniciar câmera" para começar a leitura.</p>
+          <p class="text-muted mt-2 small" id="camera-status">
+            Detecta automaticamente <strong>QR Code</strong> e <strong>código de barras linear</strong> (Code 39 / Code 128 / ITF).
+          </p>
         </div>
       </div>
     </div>
@@ -56,23 +65,49 @@
       <div class="card shadow-sm">
         <div class="card-body">
           <label for="upload-input" class="form-label fw-semibold">Selecione a foto da nota fiscal</label>
-          <input class="form-control" type="file" id="upload-input" accept="image/*" onchange="lerQRUpload(this)" aria-label="Imagem da nota fiscal">
-          <p class="text-muted mt-2 small">A imagem será processada localmente no seu navegador — nenhum arquivo é enviado ao servidor.</p>
+          <input class="form-control" type="file" id="upload-input" accept="image/*" onchange="lerCodigoUpload(this)" aria-label="Imagem da nota fiscal">
+          <p class="text-muted mt-2 small">Tenta ler QR Code e código de barras linear. Nenhum arquivo é enviado ao servidor.</p>
           <canvas id="canvas-upload" style="display:none;"></canvas>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- RESULTADO DO QR -->
+    <!-- ABA CHAVE DE ACESSO (44 dígitos — funciona para notas sem QR Code) -->
+    <div class="tab-pane fade" id="tab-chave" role="tabpanel">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <label for="input-chave" class="form-label fw-semibold">
+            Chave de acesso da NF-e / NFC-e
+          </label>
+          <div class="input-group">
+            <input type="text" id="input-chave" class="form-control font-monospace"
+              placeholder="00000000000000000000000000000000000000000000"
+              maxlength="47"
+              aria-label="Chave de acesso da nota fiscal (44 dígitos)"
+              oninput="formatarChave(this)">
+            <button class="btn btn-primary" type="button" onclick="enviarChave()">
+              <i class="fas fa-search me-1" aria-hidden="true"></i>Consultar
+            </button>
+          </div>
+          <div class="form-text">
+            44 dígitos numéricos — impressos abaixo do código de barras na DANFE ou no DANF-e.
+            Pode conter espaços ou pontos (serão ignorados automaticamente).
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /tab-content -->
+
+  <!-- RESULTADO DO QR / Barcode -->
   <div id="resultado-qr" class="mt-4" style="display:none;">
-    <div class="alert alert-success">
+    <div class="alert alert-success py-2">
       <i class="fas fa-check-circle me-2" aria-hidden="true"></i>
-      <strong>QR Code lido com sucesso!</strong>
+      <strong>Código lido com sucesso!</strong>
       <div class="mt-1 small text-break" id="url-qr"></div>
     </div>
     <div class="text-center">
-      <span class="spinner-border spinner-border-sm me-2" id="spinner-consulta" aria-hidden="true"></span>
+      <span class="spinner-border spinner-border-sm me-2" id="spinner-consulta" role="status" aria-label="Consultando..."></span>
       <span id="status-consulta">Consultando dados na Sefaz...</span>
     </div>
   </div>
@@ -81,97 +116,204 @@
   <div id="erro-qr" class="mt-4 alert alert-danger" style="display:none;">
     <i class="fas fa-exclamation-triangle me-2" aria-hidden="true"></i>
     <span id="msg-erro"></span>
+    <div class="mt-2">
+      <small class="text-muted">Se o problema persistir, use a aba <strong>Chave de acesso</strong> para digitar os 44 dígitos manualmente.</small>
+    </div>
   </div>
 </div>
 
-<!-- jsQR para leitura no browser -->
+<!-- jsQR para QR Code -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-<script>
-let stream = null;
-let scanLoop = null;
-let jaLeu = false;
+<!-- ZXing para códigos de barras lineares (Code 39, Code 128, ITF, EAN-13, EAN-8) -->
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 
+<script>
+// ──────────────────────────────────────────────────────────
+//  Controle geral
+// ──────────────────────────────────────────────────────────
+let stream      = null;
+let scanLoop    = null;
+let jaLeu       = false;
+let zxingReader = null;
+
+// ZXing — suporta Code39, Code128, ITF, EAN-13, EAN-8, etc.
+try {
+  const hints = new Map();
+  const formats = [
+    ZXing.BarcodeFormat.CODE_39,
+    ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.ITF,
+    ZXing.BarcodeFormat.EAN_13,
+    ZXing.BarcodeFormat.EAN_8,
+  ];
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+  zxingReader = new ZXing.MultiFormatReader();
+  zxingReader.setHints(hints);
+} catch(e) {
+  console.warn("ZXing não inicializado:", e);
+}
+
+// ──────────────────────────────────────────────────────────
+//  Câmera
+// ──────────────────────────────────────────────────────────
 async function iniciarCamera() {
   jaLeu = false;
   document.getElementById('btn-start-camera').style.display = 'none';
-  document.getElementById('btn-stop-camera').style.display = '';
-  document.getElementById('camera-status').textContent = 'Aponte para o QR Code da nota...';
+  document.getElementById('btn-stop-camera').style.display  = '';
+  document.getElementById('camera-status').textContent = 'Aponte para o QR Code ou código de barras da nota...';
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     const video = document.getElementById('preview');
     video.srcObject = stream;
-    video.play();
-    video.addEventListener('loadedmetadata', () => { scanLoop = setInterval(escanear, 200); });
+    await video.play();
+    video.addEventListener('loadedmetadata', () => {
+      scanLoop = setInterval(escanear, 250);
+    }, { once: true });
   } catch(e) {
     document.getElementById('camera-status').textContent = 'Erro ao acessar câmera: ' + e.message;
     document.getElementById('btn-start-camera').style.display = '';
-    document.getElementById('btn-stop-camera').style.display = 'none';
+    document.getElementById('btn-stop-camera').style.display  = 'none';
   }
 }
 
 function escanear() {
   if (jaLeu) return;
   const video = document.getElementById('preview');
-  if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+  if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
   const canvas = document.getElementById('canvas');
-  canvas.width = video.videoWidth;
+  canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-  if (code && code.data) {
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // 1) Tenta QR Code primeiro (jsQR)
+  const qr = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+  if (qr && qr.data) {
     jaLeu = true;
     pararCamera();
-    processarQR(code.data);
+    processarCodigo(qr.data, 'qr');
+    return;
+  }
+
+  // 2) Tenta código de barras linear (ZXing)
+  if (zxingReader) {
+    try {
+      const luminance = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const binarizer = new ZXing.HybridBinarizer(luminance);
+      const bitmap    = new ZXing.BinaryBitmap(binarizer);
+      const result    = zxingReader.decode(bitmap);
+      if (result && result.getText()) {
+        jaLeu = true;
+        pararCamera();
+        processarCodigo(result.getText(), 'barcode');
+        return;
+      }
+    } catch(e) {
+      // NotFoundException é lançada quando não lê — normal, ignorar
+    }
   }
 }
 
 function pararCamera() {
-  if (scanLoop) clearInterval(scanLoop);
-  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (scanLoop) { clearInterval(scanLoop); scanLoop = null; }
+  if (stream)   { stream.getTracks().forEach(t => t.stop()); stream = null; }
   document.getElementById('btn-start-camera').style.display = '';
-  document.getElementById('btn-stop-camera').style.display = 'none';
+  document.getElementById('btn-stop-camera').style.display  = 'none';
   document.getElementById('camera-status').textContent = 'Câmera parada.';
 }
 
-function lerQRUpload(input) {
+// ──────────────────────────────────────────────────────────
+//  Upload de imagem
+// ──────────────────────────────────────────────────────────
+function lerCodigoUpload(input) {
   if (!input.files[0]) return;
   const reader = new FileReader();
   reader.onload = function(e) {
     const img = new Image();
     img.onload = function() {
       const canvas = document.getElementById('canvas-upload');
-      canvas.width = img.width;
+      canvas.width  = img.width;
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, img.width, img.height);
-      const code = jsQR(imageData.data, img.width, img.height);
-      if (code && code.data) {
-        processarQR(code.data);
-      } else {
-        mostrarErro('QR Code não encontrado na imagem. Tente uma foto com mais luz e o QR Code bem enquadrado.');
+
+      // Tenta QR primeiro
+      const imgData = ctx.getImageData(0, 0, img.width, img.height);
+      const qr = jsQR(imgData.data, img.width, img.height);
+      if (qr && qr.data) {
+        processarCodigo(qr.data, 'qr');
+        return;
       }
+
+      // Tenta barcode linear
+      if (zxingReader) {
+        try {
+          const luminance = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+          const binarizer = new ZXing.HybridBinarizer(luminance);
+          const bitmap    = new ZXing.BinaryBitmap(binarizer);
+          const result    = zxingReader.decode(bitmap);
+          if (result && result.getText()) {
+            processarCodigo(result.getText(), 'barcode');
+            return;
+          }
+        } catch(e) { /* não encontrou */ }
+      }
+
+      mostrarErro('Nenhum QR Code ou código de barras encontrado na imagem. Tente com mais luz ou use a aba "Chave de acesso".');
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(input.files[0]);
 }
 
-function processarQR(url) {
+// ──────────────────────────────────────────────────────────
+//  Chave de acesso (input manual — 44 dígitos)
+// ──────────────────────────────────────────────────────────
+function formatarChave(input) {
+  // Remove tudo que não for dígito
+  let val = input.value.replace(/\D/g, '').slice(0, 44);
+  // Insere espaço a cada 4 dígitos para facilitar leitura
+  input.value = val.match(/.{1,4}/g)?.join(' ') || val;
+}
+
+function enviarChave() {
+  const raw = document.getElementById('input-chave').value.replace(/\D/g, '');
+  if (raw.length !== 44) {
+    mostrarErro('A chave de acesso deve ter exatamente 44 dígitos numéricos.');
+    return;
+  }
+  processarCodigo(raw, 'chave');
+}
+
+// ──────────────────────────────────────────────────────────
+//  Processamento comum (QR, barcode ou chave)
+// ──────────────────────────────────────────────────────────
+function processarCodigo(valor, tipo) {
   document.getElementById('resultado-qr').style.display = '';
-  document.getElementById('erro-qr').style.display = 'none';
-  document.getElementById('url-qr').textContent = url;
+  document.getElementById('erro-qr').style.display      = 'none';
   document.getElementById('spinner-consulta').style.display = '';
-  document.getElementById('status-consulta').textContent = 'Consultando dados na Sefaz...';
+  document.getElementById('status-consulta').textContent   = 'Consultando dados na Sefaz...';
+
+  const label = tipo === 'qr'      ? 'QR Code: '      :
+                tipo === 'barcode' ? 'Cód. barras: '   : 'Chave: ';
+  document.getElementById('url-qr').textContent = label + valor;
+
+  // Detectar se é URL (QR Code) ou chave/barcode (44 dígitos)
+  const isUrl   = valor.startsWith('http');
+  const isChave = /^\d{44}$/.test(valor.replace(/\D/g, ''));
+
+  const body = isUrl   ? { url:   valor } :
+               isChave ? { chave: valor.replace(/\D/g, '') } :
+                         { url:   valor };  // fallback
 
   fetch('/nfe/consultar', {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: url })
+    body:    JSON.stringify(body)
   })
   .then(r => r.json())
   .then(data => {
@@ -183,13 +325,14 @@ function processarQR(url) {
       window.location.href = '/nfe/confirmar?token=' + data.token;
     }
   })
-  .catch(() => mostrarErro('Erro de conexão ao consultar a nota. Tente novamente.'));
+  .catch(() => mostrarErro('Erro de conexão ao consultar a nota. Verifique sua internet e tente novamente.'));
 }
 
 function mostrarErro(msg) {
-  document.getElementById('erro-qr').style.display = '';
-  document.getElementById('msg-erro').textContent = msg;
+  document.getElementById('erro-qr').style.display         = '';
+  document.getElementById('msg-erro').textContent          = msg;
   document.getElementById('spinner-consulta').style.display = 'none';
+  document.getElementById('resultado-qr').style.display    = 'none';
 }
 </script>
 {% endblock %}

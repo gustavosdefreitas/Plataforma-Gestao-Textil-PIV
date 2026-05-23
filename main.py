@@ -2383,6 +2383,59 @@ def _texto_limpo(tag) -> str:
     return tag.get_text(separator=" ", strip=True) if tag else ""
 
 
+
+def chave_acesso_para_url(chave: str) -> str:
+    """
+    Converte chave de acesso NF-e (44 dígitos) em URL de consulta Sefaz.
+    A chave contém: cUF(2) + AAMM(4) + CNPJ(14) + mod(2) + série(3) + nNF(9) + ...
+    Monta a URL do portal nacional ou do estado emissor.
+    """
+    chave = re.sub(r"\D", "", chave)
+    if len(chave) != 44:
+        raise ValueError(f"Chave de acesso inválida: deve ter 44 dígitos, recebeu {len(chave)}.")
+
+    cUF = chave[:2]
+    mod = chave[20:22]   # 55 = NF-e, 65 = NFC-e
+
+    # Mapa de cUF → domínio do portal Sefaz estadual
+    SEFAZ_URLS = {
+        "12": "https://www.sefaz.ac.gov.br/nfce/consulta",        # AC
+        "27": "https://www.sefaz.al.gov.br/nfce/consulta",        # AL
+        "16": "https://www.sefaz.ap.gov.br/nfce/consulta",        # AP
+        "13": "https://www.sefaz.am.gov.br/nfce/consulta",        # AM
+        "29": "https://www.sefaz.ba.gov.br/nfce/consulta",        # BA
+        "23": "https://www.sefaz.ce.gov.br/nfce/consulta",        # CE
+        "53": "https://www.sefaz.df.gov.br/nfce/consulta",        # DF
+        "32": "https://www.sefaz.es.gov.br/nfce/consulta",        # ES
+        "52": "https://www.sefaz.go.gov.br/nfce/consulta",        # GO
+        "21": "https://www.sefaz.ma.gov.br/nfce/consulta",        # MA
+        "51": "https://www.sefaz.mt.gov.br/nfce/consulta",        # MT
+        "50": "https://www.sefaz.ms.gov.br/nfce/consulta",        # MS
+        "31": "https://www.nfce.fazenda.mg.gov.br/portalnfce",    # MG
+        "15": "https://www.sefa.pa.gov.br/nfce/consulta",         # PA
+        "25": "https://www.sefaz.pb.gov.br/nfce/consulta",        # PB
+        "41": "https://www.nfce.fazenda.pr.gov.br/portalnfce",    # PR
+        "26": "https://nfce.sefaz.pe.gov.br/nfce-web/consultarNFCe", # PE
+        "22": "https://www.sefaz.pi.gov.br/nfce/consulta",        # PI
+        "33": "https://www.nfce.fazenda.rj.gov.br/consulta",      # RJ
+        "24": "https://www.set.rn.gov.br/nfce/consulta",          # RN
+        "43": "https://www.nfe.se.rs.gov.br/nfce/consulta",       # RS
+        "11": "https://www.nfe.ro.gov.br/nfce/consulta",          # RO
+        "14": "https://www.sefaz.rr.gov.br/nfce/consulta",        # RR
+        "42": "https://www.nfe.sef.sc.gov.br/nfce/consulta",      # SC
+        "35": "https://www.nfce.fazenda.sp.gov.br/consulta",      # SP
+        "28": "https://www.nfce.se.gov.br/consulta",              # SE
+        "17": "https://www.sefaz.to.gov.br/nfce/consulta",        # TO
+    }
+
+    base = SEFAZ_URLS.get(cUF)
+
+    if base:
+        return f"{base}?p={chave}|2|1|1|"
+
+    # Fallback: portal nacional NF-e (modelo 55)
+    return f"https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=7PhJ+gAVw2g=&nfe={chave}"
+
 def consultar_sefaz_url(url: str) -> dict:
     """
     Faz GET na URL da NF-e (embutida no QR Code) e extrai:
@@ -2545,12 +2598,20 @@ async def nfe_consultar(request: Request):
 
     try:
         body = await request.json()
-        url_nfe = body.get("url", "").strip()
+        url_nfe   = body.get("url", "").strip()
+        chave_raw = re.sub(r"\D", "", body.get("chave", ""))
     except Exception:
         return JSONResponse(status_code=400, content={"erro": "Corpo da requisição inválido."})
 
-    if not url_nfe:
-        return JSONResponse(status_code=400, content={"erro": "URL da NF-e não informada."})
+    # Aceita: URL completa do QR Code OU chave de acesso de 44 dígitos
+    if not url_nfe and not chave_raw:
+        return JSONResponse(status_code=400, content={"erro": "Informe a URL da NF-e ou a chave de acesso (44 dígitos)."})
+
+    if chave_raw and not url_nfe:
+        try:
+            url_nfe = chave_acesso_para_url(chave_raw)
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"erro": str(e)})
 
     try:
         dados = consultar_sefaz_url(url_nfe)
