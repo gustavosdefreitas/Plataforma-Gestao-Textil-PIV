@@ -2395,7 +2395,6 @@ def chave_acesso_para_url(chave: str) -> str:
         raise ValueError(f"Chave de acesso inválida: deve ter 44 dígitos, recebeu {len(chave)}.")
 
     cUF = chave[:2]
-    mod = chave[20:22]   # 55 = NF-e, 65 = NFC-e
 
     # Mapa de cUF → domínio do portal Sefaz estadual
     SEFAZ_URLS = {
