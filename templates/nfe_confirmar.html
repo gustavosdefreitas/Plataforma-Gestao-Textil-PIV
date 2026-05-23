@@ -60,7 +60,7 @@
         <label class="form-label" for="empresa_id">Selecione a empresa</label>
         <select class="form-select" name="empresa_id" id="empresa_id" required aria-required="true">
           {% for emp in empresas %}
-            <option value="{{ emp.id }}">{{ emp.razao_social }} ({{ emp.cnpj }})</option>
+            <option value="{{ emp.id }}">{{ emp.nome }}</option>
           {% endfor %}
         </select>
       </div>

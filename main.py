@@ -2538,10 +2538,19 @@ async def nfe_scanner_page(request: Request):
 
 
 @app.post("/nfe/consultar")
-async def nfe_consultar(request: Request, url_nfe: str = Form(...)):
+async def nfe_consultar(request: Request):
     user = get_current_user(request)
     if not user or user.perfil != "admin":
         return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+
+    try:
+        body = await request.json()
+        url_nfe = body.get("url", "").strip()
+    except Exception:
+        return JSONResponse(status_code=400, content={"erro": "Corpo da requisição inválido."})
+
+    if not url_nfe:
+        return JSONResponse(status_code=400, content={"erro": "URL da NF-e não informada."})
 
     try:
         dados = consultar_sefaz_url(url_nfe)
@@ -2549,12 +2558,12 @@ async def nfe_consultar(request: Request, url_nfe: str = Form(...)):
         return JSONResponse(status_code=400, content={"erro": str(e)})
 
     if not dados["fornecedor"]["cnpj"]:
-        return JSONResponse(status_code=422, content={"erro": "Não foi possível extrair o CNPJ da nota fiscal."})
+        return JSONResponse(status_code=422, content={"erro": "Não foi possível extrair o CNPJ da nota fiscal. Tente novamente com melhor iluminação ou use a aba de upload."})
 
     token = str(uuid.uuid4())
     nfe_cache[token] = dados
 
-    return RedirectResponse(f"/nfe/confirmar?token={token}", status_code=303)
+    return JSONResponse({"ok": True, "token": token})
 
 
 @app.get("/nfe/confirmar", response_class=HTMLResponse)
@@ -2572,10 +2581,10 @@ async def nfe_confirmar_page(request: Request, token: str):
     with engine.connect() as conn:
         # Verificar se fornecedor já existe
         forn = conn.execute(
-            text("SELECT id, razao_social FROM fornecedores WHERE cnpj = :cnpj"),
+            text("SELECT id, nome FROM fornecedores WHERE cnpj = :cnpj"),
             {"cnpj": cnpj}
         ).fetchone()
-        fornecedor_existente = forn is not None
+        fornecedor_existente = forn is not None  # forn.nome available if needed
 
         # Listar empresas para o usuário selecionar a empresa destino
         empresas = conn.execute(
@@ -2618,64 +2627,94 @@ async def nfe_confirmar_page(request: Request, token: str):
     })
 
 
-class NfeSalvarPayload(BaseModel):
-    token: str
-    empresa_id: int
-    fornecedor_nome: str
-    fornecedor_cnpj: str
-    itens: list  # lista de dicts com produto_id/nome/quantidade/preco
-
-
 @app.post("/nfe/salvar")
-async def nfe_salvar(request: Request, payload: NfeSalvarPayload):
+async def nfe_salvar(request: Request):
+    """Recebe form-encoded do nfe_confirmar.html e salva fornecedor + itens."""
     user = get_current_user(request)
     if not user or user.perfil != "admin":
-        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+        return RedirectResponse("/", status_code=302)
 
-    dados_cache = nfe_cache.get(payload.token)
+    form = await request.form()
+
+    token       = form.get("token", "")
+    empresa_id  = int(form.get("empresa_id", 0))
+    total_itens = int(form.get("total_itens", 0))
+
+    dados_cache = nfe_cache.get(token)
     if not dados_cache:
-        return JSONResponse(status_code=400, content={"erro": "Token expirado ou inválido."})
+        return RedirectResponse("/nfe/scanner?msg=token_invalido", status_code=302)
 
-    cnpj_limpo = re.sub(r"\D", "", payload.fornecedor_cnpj)
+    # Fornecedor — pode já existir (sem campos no form) ou ser novo
+    forn_cnpj        = re.sub(r"\D", "", form.get("forn_cnpj", dados_cache["fornecedor"]["cnpj"]))
+    forn_razao_social = form.get("forn_razao_social", dados_cache["fornecedor"]["razao_social"])
+    forn_telefone    = form.get("forn_telefone", "")
+    forn_email       = form.get("forn_email", "")
+
     resultados = []
 
     with engine.connect() as conn:
         # ── Fornecedor ──────────────────────────────────────────
         forn = conn.execute(
             text("SELECT id FROM fornecedores WHERE cnpj = :cnpj"),
-            {"cnpj": cnpj_limpo}
+            {"cnpj": forn_cnpj}
         ).fetchone()
 
         if forn:
             fornecedor_id = forn.id
             conn.execute(
-                text("""
-                    UPDATE fornecedores
-                    SET razao_social = :nome
-                    WHERE id = :id
-                """),
-                {"nome": payload.fornecedor_nome, "id": fornecedor_id}
+                text("UPDATE fornecedores SET nome = :nome WHERE id = :id"),
+                {"nome": forn_razao_social, "id": fornecedor_id}
             )
         else:
             r = conn.execute(
                 text("""
-                    INSERT INTO fornecedores (razao_social, cnpj, situacao_cadastral, criado_em)
-                    VALUES (:nome, :cnpj, 'Ativo', NOW())
+                    INSERT INTO fornecedores
+                      (nome, cnpj, telefone, email, situacao_cadastral, criado_em)
+                    VALUES (:nome, :cnpj, :tel, :email, 'Ativo', NOW())
                     RETURNING id
                 """),
-                {"nome": payload.fornecedor_nome, "cnpj": cnpj_limpo}
+                {"nome": forn_razao_social, "cnpj": forn_cnpj,
+                 "tel": forn_telefone or None, "email": forn_email or None}
             )
             fornecedor_id = r.fetchone().id
 
         # ── Itens ───────────────────────────────────────────────
-        for item in payload.itens:
-            produto_id = item.get("produto_id")
-            nome = item.get("nome", "").strip()
-            qtd = float(item.get("quantidade", 1))
-            preco = float(item.get("preco_unitario", 0))
+        # Reconstituir produto_id de cada item a partir do cache
+        cache_itens = dados_cache.get("itens", [])
 
-            if produto_id:
-                # Produto existente → incrementar estoque
+        for i in range(total_itens):
+            nome  = (form.get(f"item_nome_{i}") or "").strip()
+            qtd   = float(form.get(f"item_qtd_{i}") or 1)
+            preco = float(form.get(f"item_preco_{i}") or 0)
+
+            if not nome:
+                continue
+
+            # Verificar se produto existe (re-consulta pelo nome dentro da empresa)
+            prod = conn.execute(
+                text("""
+                    SELECT id FROM produtos
+                    WHERE empresa_id = :eid
+                      AND LOWER(nome) = LOWER(:nome)
+                    LIMIT 1
+                """),
+                {"eid": empresa_id, "nome": nome}
+            ).fetchone()
+
+            if not prod and i < len(cache_itens):
+                # Tenta pelo nome sugerido do cache (descrição parcial)
+                desc = cache_itens[i].get("descricao", "")[:20]
+                prod = conn.execute(
+                    text("""
+                        SELECT id FROM produtos
+                        WHERE empresa_id = :eid
+                          AND LOWER(nome) LIKE LOWER(:busca)
+                        LIMIT 1
+                    """),
+                    {"eid": empresa_id, "busca": f"%{desc}%"}
+                ).fetchone()
+
+            if prod:
                 conn.execute(
                     text("""
                         UPDATE produtos
@@ -2683,32 +2722,26 @@ async def nfe_salvar(request: Request, payload: NfeSalvarPayload):
                             fornecedor_id = :fid
                         WHERE id = :pid
                     """),
-                    {"qtd": qtd, "fid": fornecedor_id, "pid": produto_id}
+                    {"qtd": qtd, "fid": fornecedor_id, "pid": prod.id}
                 )
-                resultados.append({"acao": "estoque_atualizado", "nome": nome, "produto_id": produto_id})
+                resultados.append({"acao": "estoque_atualizado", "nome": nome, "produto_id": prod.id})
             else:
-                # Produto novo → criar
                 r2 = conn.execute(
                     text("""
-                        INSERT INTO produtos (nome, quantidade, preco, empresa_id, fornecedor_id, criado_em)
+                        INSERT INTO produtos
+                          (nome, quantidade, preco, empresa_id, fornecedor_id, criado_em)
                         VALUES (:nome, :qtd, :preco, :eid, :fid, NOW())
                         RETURNING id
                     """),
-                    {
-                        "nome": nome,
-                        "qtd": qtd,
-                        "preco": preco,
-                        "eid": payload.empresa_id,
-                        "fid": fornecedor_id,
-                    }
+                    {"nome": nome, "qtd": qtd, "preco": preco,
+                     "eid": empresa_id, "fid": fornecedor_id}
                 )
                 novo_id = r2.fetchone().id
                 resultados.append({"acao": "produto_criado", "nome": nome, "produto_id": novo_id})
 
         conn.commit()
 
-    # Liberar cache
-    nfe_cache.pop(payload.token, None)
+    nfe_cache.pop(token, None)
 
     # Log
     try:
@@ -2718,13 +2751,19 @@ async def nfe_salvar(request: Request, payload: NfeSalvarPayload):
                     INSERT INTO logs_sistema (usuario_id, acao, detalhes, criado_em)
                     VALUES (:uid, 'nfe_entrada', :det, NOW())
                 """),
-                {"uid": user.id, "det": json.dumps({"fornecedor_id": fornecedor_id, "itens": len(resultados)})}
+                {"uid": user.id,
+                 "det": json.dumps({"fornecedor_id": fornecedor_id, "itens": len(resultados)}, ensure_ascii=False)}
             )
             conn.commit()
     except Exception:
         pass
 
-    return JSONResponse({"ok": True, "fornecedor_id": fornecedor_id, "itens": resultados})
+    acoes = len([r for r in resultados if r["acao"] == "produto_criado"])
+    atualizacoes = len([r for r in resultados if r["acao"] == "estoque_atualizado"])
+    return RedirectResponse(
+        f"/produtos?msg=nfe_ok&criados={acoes}&atualizados={atualizacoes}",
+        status_code=303
+    )
 
 
 # ─────────────────────────────────────────────────────────────
