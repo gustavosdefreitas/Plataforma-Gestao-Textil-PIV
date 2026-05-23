@@ -2734,7 +2734,7 @@ async def nfe_confirmar_page(request: Request, token: str):
 
         # Listar empresas para o usuário selecionar a empresa destino
         empresas = conn.execute(
-            text("SELECT id, nome FROM empresas ORDER BY nome")
+            text("SELECT id, nome_fantasia FROM empresas ORDER BY nome_fantasia")
         ).fetchall()
 
         # Para cada item, verificar se produto já existe (busca por nome aproximado)
@@ -2769,7 +2769,7 @@ async def nfe_confirmar_page(request: Request, token: str):
         "token": token,
         "dados": dados_view,
         "fornecedor_existente": fornecedor_existente,
-        "empresas": [{"id": e.id, "nome": e.nome} for e in empresas],
+        "empresas": [{"id": e.id, "nome": e.nome_fantasia} for e in empresas],
     })
 
 
