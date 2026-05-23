@@ -2436,12 +2436,64 @@ def chave_acesso_para_url(chave: str) -> str:
     # Fallback: portal nacional NF-e (modelo 55)
     return f"https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=7PhJ+gAVw2g=&nfe={chave}"
 
+
+def extrair_dados_chave(chave: str) -> dict:
+    """
+    Extrai CNPJ do emitente diretamente da chave de acesso (posições 6-19)
+    e consulta a BrasilAPI para obter razão social.
+    Retorna dict com fornecedor e itens=[].
+    """
+    chave = re.sub(r"\D", "", chave)
+    if len(chave) != 44:
+        raise ValueError(f"Chave de acesso inválida: {len(chave)} dígitos (esperado 44).")
+
+    cnpj = chave[6:20]
+
+    # Consultar BrasilAPI (gratuita, sem autenticação)
+    razao_social = ""
+    try:
+        with httpx.Client(follow_redirects=True, timeout=10) as client:
+            r = client.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
+            if r.status_code == 200:
+                data = r.json()
+                razao_social = data.get("razao_social") or data.get("nome_fantasia") or ""
+    except Exception:
+        pass
+
+    return {
+        "fornecedor": {"cnpj": cnpj, "razao_social": razao_social},
+        "itens": [],
+        "chave": chave,
+        "aviso": "" if razao_social else "Razão social não encontrada — confirme manualmente.",
+    }
+
+
+def url_para_chave(url: str) -> str:
+    """
+    Tenta extrair a chave de 44 dígitos de uma URL Sefaz.
+    Muitos QR Codes contêm a chave como parâmetro ?p=CHAVE|... ou na query string.
+    """
+    # Padrão comum: ?p=44digitos| ou &chNFe=44digitos
+    m = re.search(r'[?&][pP]=(\d{44})', url)
+    if m:
+        return m.group(1)
+    m = re.search(r'chNFe=(\d{44})', url)
+    if m:
+        return m.group(1)
+    m = re.search(r'nfe=(\d{44})', url, re.I)
+    if m:
+        return m.group(1)
+    # Busca genérica: sequência de 44 dígitos na URL
+    m = re.search(r'(\d{44})', url)
+    if m:
+        return m.group(1)
+    return ""
+
 def consultar_sefaz_url(url: str) -> dict:
     """
-    Faz GET na URL da NF-e (embutida no QR Code) e extrai:
-      - fornecedor: cnpj, razao_social
-      - itens: descricao, codigo, quantidade, preco_unitario
-    Tenta múltiplos seletores pois o layout varia por estado.
+    Faz GET na URL da NF-e e extrai emitente + itens via BeautifulSoup.
+    Usado como complemento quando temos a URL completa (QR Code).
+    Se o scraping falhar para o emitente, extrai CNPJ da própria URL/chave.
     """
     headers = {
         "User-Agent": (
@@ -2464,7 +2516,6 @@ def consultar_sefaz_url(url: str) -> dict:
     cnpj = ""
     razao_social = ""
 
-    # Padrão 1: tabela com label "CNPJ"
     for td in soup.find_all("td"):
         txt = td.get_text(strip=True)
         if "CNPJ" in txt and not cnpj:
@@ -2476,7 +2527,6 @@ def consultar_sefaz_url(url: str) -> dict:
             if nxt and not razao_social:
                 razao_social = nxt.get_text(strip=True)
 
-    # Padrão 2: divs / spans com atributo ou classe
     if not cnpj:
         for tag in soup.find_all(["span", "div", "p"]):
             txt = tag.get_text(strip=True)
@@ -2485,14 +2535,29 @@ def consultar_sefaz_url(url: str) -> dict:
                 cnpj = re.sub(r"\D", "", m.group())
                 break
 
-    # Padrão 3: texto bruto
     if not cnpj:
         m = re.search(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}", html)
         if m:
             cnpj = re.sub(r"\D", "", m.group())
 
+    # Se ainda sem CNPJ, tentar extrair da própria URL (chave embutida)
+    if not cnpj:
+        chave_url = url_para_chave(url)
+        if len(chave_url) == 44:
+            cnpj = chave_url[6:20]
+
+    # Razão social via BrasilAPI se não veio no scraping
+    if cnpj and not razao_social:
+        try:
+            with httpx.Client(follow_redirects=True, timeout=8) as client:
+                r = client.get(f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}")
+                if r.status_code == 200:
+                    data = r.json()
+                    razao_social = data.get("razao_social") or data.get("nome_fantasia") or ""
+        except Exception:
+            pass
+
     if not razao_social:
-        # tenta pegar o primeiro <h4> ou <strong> grande
         for tag in soup.find_all(["h4", "h3", "h2", "strong", "b"]):
             t = tag.get_text(strip=True)
             if len(t) > 5 and not any(c.isdigit() for c in t[:3]):
@@ -2502,7 +2567,6 @@ def consultar_sefaz_url(url: str) -> dict:
     # ── Itens ─────────────────────────────────────────────────
     itens = []
 
-    # Padrão 1: tabela com cabeçalho contendo "Descrição" / "Qtde" / "Valor"
     tabelas = soup.find_all("table")
     for tabela in tabelas:
         headers_row = tabela.find("tr")
@@ -2511,7 +2575,6 @@ def consultar_sefaz_url(url: str) -> dict:
         ths = [th.get_text(strip=True).lower() for th in headers_row.find_all(["th", "td"])]
         if not any("desc" in h for h in ths):
             continue
-        # mapear índices
         idx_desc = next((i for i, h in enumerate(ths) if "desc" in h), None)
         idx_cod  = next((i for i, h in enumerate(ths) if "cod" in h), None)
         idx_qtd  = next((i for i, h in enumerate(ths) if h in ("qtd", "qtde", "quant", "quantidade")), None)
@@ -2530,7 +2593,7 @@ def consultar_sefaz_url(url: str) -> dict:
             desc = col(idx_desc)
             if not desc:
                 continue
-            cod  = col(idx_cod)
+            cod      = col(idx_cod)
             qtd_txt  = col(idx_qtd).replace(",", ".")
             vun_txt  = col(idx_vun).replace("R$", "").replace(".", "").replace(",", ".").strip()
             vtot_txt = col(idx_vtot).replace("R$", "").replace(".", "").replace(",", ".").strip()
@@ -2556,12 +2619,11 @@ def consultar_sefaz_url(url: str) -> dict:
         if itens:
             break
 
-    # Padrão 2: linhas com classe contendo "item"
     if not itens:
         for row in soup.find_all(class_=re.compile(r"item", re.I)):
             tds = row.find_all(["td", "span", "div"])
             if len(tds) >= 3:
-                desc = _texto_limpo(tds[0])
+                desc    = _texto_limpo(tds[0])
                 qtd_txt = _texto_limpo(tds[1]).replace(",", ".")
                 val_txt = _texto_limpo(tds[-1]).replace("R$", "").replace(".", "").replace(",", ".").strip()
                 try:
@@ -2603,23 +2665,46 @@ async def nfe_consultar(request: Request):
     except Exception:
         return JSONResponse(status_code=400, content={"erro": "Corpo da requisição inválido."})
 
-    # Aceita: URL completa do QR Code OU chave de acesso de 44 dígitos
     if not url_nfe and not chave_raw:
         return JSONResponse(status_code=400, content={"erro": "Informe a URL da NF-e ou a chave de acesso (44 dígitos)."})
 
+    dados = None
+
+    # ── Estratégia 1: chave pura (barcode/digitação manual) ──────────────────
     if chave_raw and not url_nfe:
         try:
-            url_nfe = chave_acesso_para_url(chave_raw)
+            dados = extrair_dados_chave(chave_raw)
         except ValueError as e:
             return JSONResponse(status_code=400, content={"erro": str(e)})
 
-    try:
-        dados = consultar_sefaz_url(url_nfe)
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"erro": str(e)})
+    # ── Estratégia 2: URL do QR Code ─────────────────────────────────────────
+    elif url_nfe:
+        # Primeiro tenta extrair chave da URL para usar BrasilAPI
+        chave_da_url = url_para_chave(url_nfe)
+        if len(chave_da_url) == 44:
+            try:
+                dados = extrair_dados_chave(chave_da_url)
+            except Exception:
+                pass
 
-    if not dados["fornecedor"]["cnpj"]:
-        return JSONResponse(status_code=422, content={"erro": "Não foi possível extrair o CNPJ da nota fiscal. Tente novamente com melhor iluminação ou use a aba de upload."})
+        # Tenta scraping da página Sefaz para pegar os ITENS
+        try:
+            dados_sefaz = consultar_sefaz_url(url_nfe)
+            if dados_sefaz["itens"]:
+                if dados:
+                    dados["itens"] = dados_sefaz["itens"]
+                else:
+                    dados = dados_sefaz
+            elif dados is None:
+                dados = dados_sefaz
+        except Exception:
+            pass  # scraping falhou — continua com dados da BrasilAPI
+
+    if not dados or not dados["fornecedor"]["cnpj"]:
+        return JSONResponse(status_code=422, content={
+            "erro": "Não foi possível identificar o CNPJ do emitente. "
+                    "Verifique se a chave de acesso está completa (44 dígitos) e tente novamente."
+        })
 
     token = str(uuid.uuid4())
     nfe_cache[token] = dados
