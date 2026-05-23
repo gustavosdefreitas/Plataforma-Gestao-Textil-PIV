@@ -6,13 +6,11 @@ import csv
 import json
 import re
 import tempfile
-import base64
 import qrcode
 import barcode
 from barcode.writer import ImageWriter
 from bs4 import BeautifulSoup
 import httpx
-from PIL import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
