@@ -138,17 +138,10 @@
 
 <script>
 // ── Estado global ─────────────────────────────────────────────
-let stream      = null;
-let scanLoop    = null;
-let jaEnviou    = false;
-let zxingReader = null;
-
-// Inicializa ZXing
-try {
-  zxingReader = new ZXing.BrowserMultiFormatReader();
-} catch(e) {
-  console.warn('ZXing não disponível:', e);
-}
+let stream   = null;
+let scanLoop = null;
+let jaEnviou = false;
+// ZXing usado como decodificador puro (sem BrowserMultiFormatReader — evita pedido duplo de câmera)
 
 // ── Câmera ────────────────────────────────────────────────────
 async function iniciarCamera() {
@@ -224,24 +217,21 @@ function escanear() {
     }
   }
 
-  // Tenta ZXing no canvas
-  if (zxingReader) {
-    try {
-      const imageEl = canvas;
-      const luminanceSource = new ZXing.HTMLCanvasElementLuminanceSource(imageEl);
-      const binaryBitmap    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
-      const hints = new Map();
-      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-      const result = new ZXing.MultiFormatReader().decode(binaryBitmap, hints);
-      if (result && result.getText()) {
-        debugTxt.textContent = 'ZXing leu: ' + result.getText().substring(0, 50);
-        jaEnviou = true;
-        pararCamera();
-        processarCodigo(result.getText().trim());
-        return;
-      }
-    } catch(e2) { /* não encontrou */ }
-  }
+  // Tenta ZXing no canvas (MultiFormatReader — só decodifica, sem câmera)
+  try {
+    const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+    const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+    const hints  = new Map();
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    const zxResult = new ZXing.MultiFormatReader().decode(bitmap, hints);
+    if (zxResult && zxResult.getText()) {
+      debugTxt.textContent = 'ZXing leu: ' + zxResult.getText().substring(0, 50);
+      jaEnviou = true;
+      pararCamera();
+      processarCodigo(zxResult.getText().trim());
+      return;
+    }
+  } catch(e2) { /* não encontrou neste frame */ }
 
   // Feedback de escaneamento ativo
   const n = (parseInt(debugTxt.dataset.frame || '0') + 1);
@@ -306,23 +296,21 @@ function lerCodigoUpload(input) {
           }
         }
 
-        // ZXing
-        if (zxingReader) {
-          try {
-            const lum    = new ZXing.HTMLCanvasElementLuminanceSource(cv);
-            const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-            const hints  = new Map();
-            hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-            const res2 = new ZXing.MultiFormatReader().decode(bitmap, hints);
-            if (res2 && res2.getText()) {
-              console.log('ZXing encontrou em', cv.width+'×'+cv.height, '->', res2.getText().substring(0,60));
-              statusEl.className = 'mt-2 small text-success';
-              statusEl.textContent = 'QR Code lido com ZXing!';
-              processarCodigo(res2.getText().trim());
-              return;
-            }
-          } catch(e3) { /* continua */ }
-        }
+        // ZXing (só decodificador)
+        try {
+          const lum    = new ZXing.HTMLCanvasElementLuminanceSource(cv);
+          const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+          const hints  = new Map();
+          hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+          const zxRes = new ZXing.MultiFormatReader().decode(bitmap, hints);
+          if (zxRes && zxRes.getText()) {
+            console.log('ZXing encontrou em', cv.width+'×'+cv.height, '->', zxRes.getText().substring(0,60));
+            statusEl.className = 'mt-2 small text-success';
+            statusEl.textContent = 'QR Code lido com ZXing!';
+            processarCodigo(zxRes.getText().trim());
+            return;
+          }
+        } catch(e3) { /* continua tentando outra resolução */ }
       }
 
       // Nenhuma biblioteca leu

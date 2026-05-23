@@ -80,10 +80,9 @@
       </div>
 
       {% if dados.itens | length == 0 %}
-      <div class="alert alert-warning m-3 mb-0 py-2">
+      <div class="alert alert-info m-3 mb-0 py-2 small">
         <i class="fas fa-info-circle me-1" aria-hidden="true"></i>
-        Os itens desta nota não foram extraídos automaticamente (NF-e modelo 55 exige JavaScript no portal da Sefaz).
-        Adicione os produtos manualmente clicando em <strong>Adicionar item</strong>.
+        Os produtos da nota precisam ser adicionados manualmente — clique em <strong>+ Adicionar item</strong> acima para cada produto recebido.
       </div>
       {% endif %}
 
