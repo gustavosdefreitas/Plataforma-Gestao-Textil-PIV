@@ -97,6 +97,9 @@
                             <a href="/produtos/editar/{{ p.id }}" class="btn btn-sm btn-outline-primary" title="Editar" aria-label="Editar produto {{ p.nome }}">
                                 <i class="fas fa-edit" aria-hidden="true"></i>
                             </a>
+                            <a href="/produtos/{{ p.id }}/etiqueta" class="btn btn-sm btn-outline-secondary" title="Etiqueta (QR + Barcode)" aria-label="Etiqueta do produto {{ p.nome }}" target="_blank">
+                                <i class="fas fa-qrcode" aria-hidden="true"></i>
+                            </a>
                             <button type="button"
                                 class="btn btn-outline-danger btn-sm"
                                 title="Excluir"
