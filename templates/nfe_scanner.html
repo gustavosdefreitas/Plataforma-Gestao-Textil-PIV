@@ -4,7 +4,7 @@
 {% block content %}
 <div class="container py-4" id="conteudo-principal">
   <h2 class="mb-1"><i class="fas fa-qrcode me-2" aria-hidden="true"></i>Entrada por Nota Fiscal</h2>
-  <p class="text-muted mb-4">Leia o QR Code, o código de barras ou informe a chave de acesso da nota.</p>
+  <p class="text-muted mb-4">Leia o QR Code, faça upload de imagem ou informe a chave de acesso da nota.</p>
 
   <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item" role="presentation">
@@ -50,10 +50,12 @@
           <div id="camera-status" class="mt-2 small text-muted">
             Compatível com celular (câmera traseira) e webcam.
           </div>
-
-          <!-- Debug: mostrar o que a câmera está lendo -->
           <div id="debug-leitura" class="mt-2 d-none">
             <span class="badge bg-secondary" id="debug-text">Aguardando leitura...</span>
+          </div>
+          <div class="alert alert-info mt-3 text-start small">
+            <i class="fas fa-lightbulb me-1"></i>
+            <strong>Dicas:</strong> Segure firme a 15–25 cm do QR Code. Boa iluminação, sem reflexo no papel. O QR Code do DANFE é pequeno — aproxime bastante.
           </div>
         </div>
       </div>
@@ -63,12 +65,13 @@
     <div class="tab-pane fade" id="tab-upload" role="tabpanel">
       <div class="card shadow-sm">
         <div class="card-body">
-          <p class="text-muted small mb-3">
+          <div class="alert alert-info small mb-3">
             <i class="fas fa-lightbulb me-1 text-warning"></i>
-            <strong>Dica:</strong> Se a câmera não funcionar, tire uma foto da nota pelo celular e faça o upload aqui.
-          </p>
+            <strong>Recomendado para notas impressas (DANFE):</strong> tire uma foto bem próxima apenas do QR Code, sem reflexo, com boa luz. A imagem deve ser nítida.
+          </div>
           <label for="upload-input" class="form-label fw-semibold">Selecione a foto da nota fiscal</label>
           <input class="form-control" type="file" id="upload-input" accept="image/*" onchange="lerCodigoUpload(this)">
+          <div id="upload-status" class="mt-2 small text-muted" style="display:none;"></div>
           <canvas id="canvas-upload" style="display:none;"></canvas>
         </div>
       </div>
@@ -78,21 +81,22 @@
     <div class="tab-pane fade" id="tab-chave" role="tabpanel">
       <div class="card shadow-sm">
         <div class="card-body">
-          <p class="text-muted small mb-3">
-            <i class="fas fa-lightbulb me-1 text-warning"></i>
+          <div class="alert alert-success small mb-3">
+            <i class="fas fa-star me-1"></i>
             <strong>Opção mais confiável:</strong> Digite ou cole a chave de 44 dígitos impressa abaixo do código de barras no DANFE.
-          </p>
+          </div>
           <label for="input-chave" class="form-label fw-semibold">Chave de acesso (44 dígitos)</label>
           <div class="input-group">
             <input type="text" id="input-chave" class="form-control font-monospace"
               placeholder="0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000"
               maxlength="54"
-              oninput="formatarChave(this)">
+              oninput="formatarChave(this)"
+              onkeydown="if(event.key==='Enter') enviarChave()">
             <button class="btn btn-primary" type="button" onclick="enviarChave()">
               <i class="fas fa-search me-1"></i>Consultar
             </button>
           </div>
-          <div class="form-text">44 dígitos numéricos — pode conter espaços (serão ignorados).</div>
+          <div class="form-text">44 dígitos numéricos — espaços são ignorados automaticamente.</div>
         </div>
       </div>
     </div>
@@ -108,7 +112,7 @@
     </div>
     <div class="text-center mt-2">
       <div class="spinner-border spinner-border-sm me-2" id="spinner-consulta" role="status"></div>
-      <span id="status-consulta">Consultando dados...</span>
+      <span id="status-consulta">Consultando dados na Sefaz...</span>
     </div>
   </div>
 
@@ -116,8 +120,9 @@
   <div id="erro-qr" class="mt-4 alert alert-danger" style="display:none;">
     <i class="fas fa-exclamation-triangle me-2"></i>
     <strong id="msg-erro"></strong>
-    <div class="mt-2 small text-muted">
-      Se o problema persistir, use a aba <strong>Chave de acesso</strong> e digite os 44 dígitos manualmente.
+    <div class="mt-2 small text-muted" id="detalhe-erro"></div>
+    <div class="mt-2 small">
+      Se o QR Code não for lido, use a aba <strong>Chave de acesso</strong> e digite os 44 dígitos do DANFE.
     </div>
     <button class="btn btn-sm btn-outline-danger mt-2" onclick="resetarTela()">
       <i class="fas fa-redo me-1"></i>Tentar novamente
@@ -126,32 +131,44 @@
 
 </div>
 
+<!-- jsQR (fallback confiável) -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<!-- ZXing (mais poderoso para QR de alta versão) -->
+<script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
 
 <script>
 // ── Estado global ─────────────────────────────────────────────
 let stream      = null;
 let scanLoop    = null;
-let jaEnviou    = false;   // impede duplo envio
+let jaEnviou    = false;
+let zxingReader = null;
+
+// Inicializa ZXing
+try {
+  zxingReader = new ZXing.BrowserMultiFormatReader();
+} catch(e) {
+  console.warn('ZXing não disponível:', e);
+}
 
 // ── Câmera ────────────────────────────────────────────────────
 async function iniciarCamera() {
   jaEnviou = false;
-  const video     = document.getElementById('preview');
+  const video       = document.getElementById('preview');
   const placeholder = document.getElementById('camera-placeholder');
-  const btnStart  = document.getElementById('btn-start-camera');
-  const btnStop   = document.getElementById('btn-stop-camera');
-  const status    = document.getElementById('camera-status');
-  const debug     = document.getElementById('debug-leitura');
+  const btnStart    = document.getElementById('btn-start-camera');
+  const btnStop     = document.getElementById('btn-stop-camera');
+  const status      = document.getElementById('camera-status');
+  const debug       = document.getElementById('debug-leitura');
 
   btnStart.disabled = true;
   status.textContent = 'Solicitando permissão de câmera...';
 
   try {
-    // Tenta câmera traseira primeiro (celular), depois qualquer câmera
-    let constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } } };
+    // Tenta câmera traseira (celular), depois frontal
     try {
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } }
+      });
     } catch(e1) {
       stream = await navigator.mediaDevices.getUserMedia({ video: true });
     }
@@ -165,39 +182,41 @@ async function iniciarCamera() {
     btnStop.style.display     = '';
     btnStart.disabled         = false;
     debug.classList.remove('d-none');
-    status.textContent = 'Aponte para o QR Code da nota...';
+    status.textContent = 'Aponte para o QR Code da nota (15–25 cm de distância)...';
 
     video.addEventListener('loadedmetadata', () => {
-      scanLoop = setInterval(escanear, 300);
+      scanLoop = setInterval(escanear, 400);
     }, { once: true });
 
   } catch(e) {
     btnStart.disabled = false;
-    status.innerHTML = `<span class="text-danger"><i class="fas fa-exclamation-triangle me-1"></i>
+    status.innerHTML = `<span class="text-danger">
+      <i class="fas fa-exclamation-triangle me-1"></i>
       Câmera bloqueada: <strong>${e.message}</strong>.<br>
-      Use a aba <strong>Upload de imagem</strong> ou <strong>Chave de acesso</strong>.</span>`;
+      Use <strong>Upload de imagem</strong> ou <strong>Chave de acesso</strong>.</span>`;
   }
 }
 
 function escanear() {
   if (jaEnviou) return;
   const video = document.getElementById('preview');
-  if (!video || video.readyState < 2) return;
+  if (!video || video.readyState < 2 || video.videoWidth === 0) return;
 
   const canvas = document.getElementById('canvas');
   canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(video, 0, 0);
-
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  // Tenta 3 modos de inversão para pegar QR Codes claros e escuros
+  const debugTxt = document.getElementById('debug-text');
+
+  // Tenta jsQR com 3 modos de inversão
   const modos = ['dontInvert', 'onlyInvert', 'attemptBoth'];
   for (const modo of modos) {
     const qr = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: modo });
     if (qr && qr.data && qr.data.length > 5) {
-      document.getElementById('debug-text').textContent = 'QR lido: ' + qr.data.substring(0, 60) + '...';
+      debugTxt.textContent = 'QR lido: ' + qr.data.substring(0, 50);
       jaEnviou = true;
       pararCamera();
       processarCodigo(qr.data.trim());
@@ -205,12 +224,29 @@ function escanear() {
     }
   }
 
-  // Feedback visual de que está escaneando
-  const frameCount = (parseInt(document.getElementById('debug-text').dataset.frame || 0) + 1);
-  document.getElementById('debug-text').dataset.frame = frameCount;
-  if (frameCount % 5 === 0) {
-    document.getElementById('debug-text').textContent = 'Escaneando... (mova levemente a câmera)';
+  // Tenta ZXing no canvas
+  if (zxingReader) {
+    try {
+      const imageEl = canvas;
+      const luminanceSource = new ZXing.HTMLCanvasElementLuminanceSource(imageEl);
+      const binaryBitmap    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      const result = new ZXing.MultiFormatReader().decode(binaryBitmap, hints);
+      if (result && result.getText()) {
+        debugTxt.textContent = 'ZXing leu: ' + result.getText().substring(0, 50);
+        jaEnviou = true;
+        pararCamera();
+        processarCodigo(result.getText().trim());
+        return;
+      }
+    } catch(e2) { /* não encontrou */ }
   }
+
+  // Feedback de escaneamento ativo
+  const n = (parseInt(debugTxt.dataset.frame || '0') + 1);
+  debugTxt.dataset.frame = n;
+  if (n % 5 === 0) debugTxt.textContent = 'Escaneando... (mova levemente a câmera se travar)';
 }
 
 function pararCamera() {
@@ -226,44 +262,88 @@ function pararCamera() {
 
 // ── Upload de imagem ──────────────────────────────────────────
 function lerCodigoUpload(input) {
-  if (!input.files[0]) return;
+  if (!input.files || !input.files[0]) return;
+
+  const statusEl = document.getElementById('upload-status');
+  statusEl.style.display = '';
+  statusEl.className = 'mt-2 small text-primary';
+  statusEl.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Processando imagem...';
+
   const reader = new FileReader();
   reader.onload = function(e) {
     const img = new Image();
     img.onload = function() {
-      const canvas = document.getElementById('canvas-upload');
-      canvas.width  = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0);
-      const imgData = ctx.getImageData(0, 0, img.width, img.height);
+      statusEl.textContent = `Imagem carregada: ${img.width}×${img.height}px. Tentando ler QR Code...`;
+      console.log('Upload - dimensões originais:', img.width, img.height);
 
-      // Tenta todos os modos de inversão
-      const modos = ['dontInvert', 'onlyInvert', 'attemptBoth'];
-      for (const modo of modos) {
-        const qr = jsQR(imgData.data, img.width, img.height, { inversionAttempts: modo });
-        if (qr && qr.data && qr.data.length > 5) {
-          processarCodigo(qr.data.trim());
-          return;
+      // Gera múltiplas resoluções para tentar (original, 1280px, 800px, 400px)
+      const resolucoes = [
+        { w: img.width,              h: img.height              },
+        { w: 1280,                   h: Math.round(img.height * 1280 / img.width) },
+        { w: 800,                    h: Math.round(img.height * 800  / img.width) },
+        { w: 400,                    h: Math.round(img.height * 400  / img.width) },
+      ].filter(r => r.w <= img.width); // não ampliar
+
+      const modos = ['attemptBoth', 'dontInvert', 'onlyInvert'];
+
+      for (const res of resolucoes) {
+        const cv  = document.createElement('canvas');
+        cv.width  = res.w;
+        cv.height = res.h;
+        const ctx = cv.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, res.w, res.h);
+
+        // jsQR
+        const imgData = ctx.getImageData(0, 0, res.w, res.h);
+        for (const modo of modos) {
+          const qr = jsQR(imgData.data, res.w, res.h, { inversionAttempts: modo });
+          if (qr && qr.data && qr.data.length > 5) {
+            console.log('jsQR encontrou em', res.w+'×'+res.h, 'modo:', modo, '->', qr.data.substring(0,60));
+            statusEl.className = 'mt-2 small text-success';
+            statusEl.textContent = 'QR Code lido com sucesso!';
+            processarCodigo(qr.data.trim());
+            return;
+          }
+        }
+
+        // ZXing
+        if (zxingReader) {
+          try {
+            const lum    = new ZXing.HTMLCanvasElementLuminanceSource(cv);
+            const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+            const hints  = new Map();
+            hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+            const res2 = new ZXing.MultiFormatReader().decode(bitmap, hints);
+            if (res2 && res2.getText()) {
+              console.log('ZXing encontrou em', cv.width+'×'+cv.height, '->', res2.getText().substring(0,60));
+              statusEl.className = 'mt-2 small text-success';
+              statusEl.textContent = 'QR Code lido com ZXing!';
+              processarCodigo(res2.getText().trim());
+              return;
+            }
+          } catch(e3) { /* continua */ }
         }
       }
 
-      // Tenta redimensionar para metade (às vezes melhora a leitura)
-      const canvas2 = document.createElement('canvas');
-      canvas2.width  = Math.floor(img.width / 2);
-      canvas2.height = Math.floor(img.height / 2);
-      const ctx2 = canvas2.getContext('2d');
-      ctx2.drawImage(img, 0, 0, canvas2.width, canvas2.height);
-      const imgData2 = ctx2.getImageData(0, 0, canvas2.width, canvas2.height);
-      const qr2 = jsQR(imgData2.data, canvas2.width, canvas2.height, { inversionAttempts: 'attemptBoth' });
-      if (qr2 && qr2.data) {
-        processarCodigo(qr2.data.trim());
-        return;
-      }
-
-      mostrarErro('QR Code não encontrado na imagem. Tente uma foto mais próxima, com boa iluminação e o QR Code bem enquadrado — ou use a aba "Chave de acesso".');
+      // Nenhuma biblioteca leu
+      console.log('Nenhuma biblioteca conseguiu ler o QR Code da imagem.');
+      statusEl.className = 'mt-2 small text-danger';
+      statusEl.textContent = 'QR Code não encontrado.';
+      mostrarErro(
+        'QR Code não encontrado na imagem.',
+        'Dicas: tire uma foto SOMENTE do QR Code (recortado), com boa iluminação, sem reflexo, com boa nitidez. ' +
+        'Ou use a aba "Chave de acesso" e digite os 44 dígitos.'
+      );
+    };
+    img.onerror = function() {
+      statusEl.className = 'mt-2 small text-danger';
+      statusEl.textContent = 'Erro ao carregar a imagem.';
+      mostrarErro('Não foi possível carregar a imagem. Tente outro arquivo.');
     };
     img.src = e.target.result;
+  };
+  reader.onerror = function() {
+    mostrarErro('Erro ao ler o arquivo de imagem.');
   };
   reader.readAsDataURL(input.files[0]);
 }
@@ -277,7 +357,7 @@ function formatarChave(input) {
 function enviarChave() {
   const raw = document.getElementById('input-chave').value.replace(/\D/g, '');
   if (raw.length !== 44) {
-    mostrarErro('A chave deve ter exatamente 44 dígitos numéricos. Verifique e tente novamente.');
+    mostrarErro('A chave deve ter exatamente 44 dígitos numéricos.', `Você digitou ${raw.length} dígitos. Verifique o DANFE e tente novamente.`);
     return;
   }
   processarCodigo(raw);
@@ -286,48 +366,53 @@ function enviarChave() {
 // ── Processamento comum ───────────────────────────────────────
 function processarCodigo(valor) {
   if (!valor) return;
+  console.log('processarCodigo:', valor.substring(0, 80));
 
-  document.getElementById('resultado-qr').style.display = '';
-  document.getElementById('erro-qr').style.display      = 'none';
+  document.getElementById('resultado-qr').style.display     = '';
+  document.getElementById('erro-qr').style.display          = 'none';
   document.getElementById('spinner-consulta').style.display = '';
-  document.getElementById('status-consulta').textContent   = 'Consultando dados na Sefaz...';
+  document.getElementById('status-consulta').textContent    = 'Consultando dados na Sefaz...';
   document.getElementById('url-qr').textContent = valor.length > 80 ? valor.substring(0, 80) + '...' : valor;
 
-  // Determinar se é URL ou chave de 44 dígitos
   const soDigitos = valor.replace(/\D/g, '');
   const body = valor.startsWith('http')
     ? { url: valor }
     : soDigitos.length === 44
       ? { chave: soDigitos }
-      : { url: valor };  // fallback: envia como URL
+      : { url: valor };
+
+  console.log('Enviando para /nfe/consultar:', JSON.stringify(body).substring(0, 100));
 
   fetch('/nfe/consultar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     body: JSON.stringify(body)
   })
   .then(r => {
-    if (!r.ok && r.status !== 400 && r.status !== 422) {
-      throw new Error(`Erro HTTP ${r.status}`);
-    }
-    return r.json();
+    console.log('Resposta HTTP:', r.status);
+    return r.json().then(data => ({ status: r.status, data }));
   })
-  .then(data => {
+  .then(({ status, data }) => {
     document.getElementById('spinner-consulta').style.display = 'none';
     if (data.erro) {
       mostrarErro(data.erro);
-    } else {
+    } else if (data.token) {
       window.location.href = '/nfe/confirmar?token=' + data.token;
+    } else {
+      mostrarErro('Resposta inesperada do servidor (HTTP ' + status + ').');
     }
   })
   .catch(err => {
-    mostrarErro('Erro de conexão: ' + err.message + '. Verifique sua internet e tente novamente.');
+    console.error('Fetch error:', err);
+    mostrarErro('Erro de conexão: ' + err.message, 'Verifique sua internet. Se o problema persistir, use a aba "Chave de acesso".');
   });
 }
 
-function mostrarErro(msg) {
+function mostrarErro(msg, detalhe) {
   document.getElementById('erro-qr').style.display          = '';
   document.getElementById('msg-erro').textContent           = msg;
+  document.getElementById('detalhe-erro').textContent       = detalhe || '';
   document.getElementById('spinner-consulta').style.display = 'none';
   document.getElementById('resultado-qr').style.display     = 'none';
   jaEnviou = false;
@@ -335,10 +420,12 @@ function mostrarErro(msg) {
 
 function resetarTela() {
   jaEnviou = false;
-  document.getElementById('erro-qr').style.display      = 'none';
-  document.getElementById('resultado-qr').style.display = 'none';
-  document.getElementById('upload-input').value         = '';
-  document.getElementById('input-chave').value          = '';
+  document.getElementById('erro-qr').style.display          = 'none';
+  document.getElementById('resultado-qr').style.display     = 'none';
+  const up = document.getElementById('upload-input');
+  if (up) up.value = '';
+  document.getElementById('upload-status').style.display    = 'none';
+  document.getElementById('input-chave').value              = '';
 }
 </script>
 {% endblock %}
