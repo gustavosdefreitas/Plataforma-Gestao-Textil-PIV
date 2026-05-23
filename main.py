@@ -2965,7 +2965,7 @@ async def produto_etiqueta_page(request: Request, produto_id: int):
         prod = conn.execute(
             text("""
                 SELECT p.id, p.nome, p.quantidade, p.preco, p.cor, p.tamanho,
-                       e.nome AS empresa_nome
+                       e.nome_fantasia AS empresa_nome
                 FROM produtos p
                 JOIN empresas e ON e.id = p.empresa_id
                 WHERE p.id = :id
@@ -2994,7 +2994,7 @@ async def produto_etiqueta_pdf(request: Request, produto_id: int):
         prod = conn.execute(
             text("""
                 SELECT p.id, p.nome, p.preco, p.cor, p.tamanho,
-                       e.nome AS empresa_nome
+                       e.nome_fantasia AS empresa_nome
                 FROM produtos p
                 JOIN empresas e ON e.id = p.empresa_id
                 WHERE p.id = :id
@@ -3093,7 +3093,7 @@ async def api_scan_produto(request: Request, codigo: str):
         prod = conn.execute(
             text("""
                 SELECT p.id, p.nome, p.preco, p.quantidade, p.cor, p.tamanho,
-                       e.nome AS empresa_nome, e.id AS empresa_id
+                       e.nome_fantasia AS empresa_nome, e.id AS empresa_id
                 FROM produtos p
                 JOIN empresas e ON e.id = p.empresa_id
                 WHERE p.id = :id
