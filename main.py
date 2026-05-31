@@ -3170,13 +3170,14 @@ async def api_venda_scanner(payload: VendaScannerPayload):
         grupo = str(uuid.uuid4())
         num_venda = conn.execute(text("SELECT nextval('seq_numero_venda')")).scalar()
 
+        total_venda = float(prod.preco) * payload.quantidade
         conn.execute(
             text("""
                 INSERT INTO vendas
-                  (produto_id, empresa_id, quantidade, preco_unitario,
+                  (produto_id, empresa_id, quantidade, preco_unitario, total,
                    cliente_nome, tipo_documento, grupo_venda, numero_venda, data_venda)
                 VALUES
-                  (:pid, :eid, :qtd, :preco,
+                  (:pid, :eid, :qtd, :preco, :total,
                    :cliente, 'CPF', :grupo, :num, NOW())
             """),
             {
@@ -3184,6 +3185,7 @@ async def api_venda_scanner(payload: VendaScannerPayload):
                 "eid": prod.empresa_id,
                 "qtd": payload.quantidade,
                 "preco": float(prod.preco),
+                "total": total_venda,
                 "cliente": payload.cliente_nome,
                 "grupo": grupo,
                 "num": num_venda,
