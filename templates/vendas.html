@@ -163,18 +163,14 @@
                                 <td>R$ {{ "%.2f"|format(v.preco_unitario) }}</td>
                                 <td class="text-success fw-bold">R$ {{ "%.2f"|format(v.total) }}</td>
                                 <td>
-                                    {% if v.tipo_documento == 'comprovante' %}
-                                        {% if v.grupo_venda %}
-                                            <a href="/vendas/comprovante/grupo/{{ v.grupo_venda }}" target="_blank" class="btn btn-sm btn-outline-danger" title="Abrir comprovante" aria-label="Abrir comprovante da venda">
-                                                <i class="fas fa-file-pdf" aria-hidden="true"></i>
-                                            </a>
-                                        {% else %}
-                                            <a href="/vendas/comprovante/{{ v.id }}" target="_blank" class="btn btn-sm btn-outline-danger" title="Abrir comprovante" aria-label="Abrir comprovante da venda">
-                                                <i class="fas fa-file-pdf" aria-hidden="true"></i>
-                                            </a>
-                                        {% endif %}
+                                    {% if v.grupo_venda %}
+                                        <a href="/vendas/comprovante/grupo/{{ v.grupo_venda }}" target="_blank" class="btn btn-sm btn-outline-danger" title="Abrir comprovante" aria-label="Abrir comprovante da venda">
+                                            <i class="fas fa-file-pdf" aria-hidden="true"></i>
+                                        </a>
                                     {% else %}
-                                        <span class="text-muted">-</span>
+                                        <a href="/vendas/comprovante/{{ v.id }}" target="_blank" class="btn btn-sm btn-outline-danger" title="Abrir comprovante" aria-label="Abrir comprovante da venda">
+                                            <i class="fas fa-file-pdf" aria-hidden="true"></i>
+                                        </a>
                                     {% endif %}
                                 </td>
                             </tr>
