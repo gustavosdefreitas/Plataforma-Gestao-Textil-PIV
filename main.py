@@ -3137,7 +3137,7 @@ async def api_venda_scanner(payload: VendaScannerPayload):
     # Autenticar via session_key (SHA-256 armazenado em usuarios.session_id)
     with engine.connect() as conn:
         usuario = conn.execute(
-            text("SELECT id, nome, perfil FROM usuarios WHERE session_id = :sk"),
+            text("SELECT id, nome_completo AS nome, perfil FROM usuarios WHERE session_id = :sk"),
             {"sk": payload.session_key}
         ).fetchone()
 
