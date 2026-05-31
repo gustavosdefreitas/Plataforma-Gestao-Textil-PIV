@@ -3206,6 +3206,7 @@ async def api_venda_scanner(payload: VendaScannerPayload):
         "preco_unitario": float(prod.preco),
         "quantidade": payload.quantidade,
         "total": round(float(prod.preco) * payload.quantidade, 2),
+        "comprovante_url": f"/vendas/comprovante/grupo/{grupo}",
     })
 
 if __name__ == "__main__":
