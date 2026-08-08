@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+{% block title %}Análise de Dados & ML — Estoque MEI{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+
+  <div class="d-flex align-items-center mb-1">
+    <i class="fas fa-chart-line fa-lg me-2 text-primary"></i>
+    <h2 class="mb-0">Análise de Dados &amp; Machine Learning</h2>
+  </div>
+  <p class="text-muted mb-4">Visualização de dados em escala — IoT, vendas, estoque e previsão de demanda por Regressão Linear.</p>
+
+  <!-- KPIs -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-primary bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-primary">{{ kpis.transacoes }}</div>
+          <div class="small text-muted">Transações (12m)</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-success bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-success">R$ {{ "%.0f"|format(kpis.faturamento) }}</div>
+          <div class="small text-muted">Faturamento (12m)</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-warning bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-warning">R$ {{ "%.2f"|format(kpis.ticket_medio) }}</div>
+          <div class="small text-muted">Ticket Médio</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-info bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-info">{{ "%.0f"|format(kpis.unidades_vendidas) }}</div>
+          <div class="small text-muted">Unidades Vendidas</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-secondary bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-secondary">{{ kpis.produtos_distintos }}</div>
+          <div class="small text-muted">Produtos Distintos</div>
+        </div>
+      </div>
+    </div>
+    {% if ml_previsao and ml_previsao.r2 is not none %}
+    <div class="col-6 col-md-4 col-lg-2">
+      <div class="card text-center shadow-sm h-100 border-0 bg-danger bg-opacity-10">
+        <div class="card-body py-3">
+          <div class="fs-4 fw-bold text-danger">{{ ml_previsao.r2 }}</div>
+          <div class="small text-muted">R² do Modelo ML</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Gráfico 1: Previsão de Demanda ML -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <span><i class="fas fa-robot me-2"></i>Previsão de Demanda — Regressão Linear (ML)</span>
+          {% if ml_previsao and ml_previsao.r2 is not none %}
+          <span class="badge bg-light text-dark">
+            R² = {{ ml_previsao.r2 }} &nbsp;|&nbsp;
+            Tendência: <strong>{{ ml_previsao.tendencia }}</strong> &nbsp;|&nbsp;
+            Coef.: {{ ml_previsao.coeficiente }} un/mês
+          </span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+          {% if ml_previsao and ml_previsao.historico %}
+          <canvas id="chartML" height="90"></canvas>
+          <p class="text-muted small mt-2 mb-0">
+            <i class="fas fa-info-circle me-1"></i>
+            O modelo foi treinado com os últimos {{ ml_previsao.historico|length }} meses de histórico de vendas.
+            Linhas tracejadas representam a previsão para os próximos 3 meses.
+            R² = {{ ml_previsao.r2 }} indica o grau de ajuste do modelo (1.0 = ajuste perfeito).
+          </p>
+          {% else %}
+          <p class="text-muted text-center py-4">Dados insuficientes — são necessários pelo menos 2 meses de histórico.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gráfico 2: Faturamento Mensal + Ticket Médio | Gráfico 3: Vendas Diárias -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-success text-white">
+          <i class="fas fa-calendar-alt me-2"></i>Faturamento Mensal (12 meses)
+        </div>
+        <div class="card-body">
+          <canvas id="chartFatMensal" height="120"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-info text-white">
+          <i class="fas fa-calendar-day me-2"></i>Vendas Diárias — Últimos 30 dias
+        </div>
+        <div class="card-body">
+          {% if vd_labels %}
+          <canvas id="chartDiario" height="120"></canvas>
+          {% else %}
+          <p class="text-muted text-center py-4">Sem vendas nos últimos 30 dias.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gráfico 4: Top 10 Produtos | Gráfico 5: Dia da Semana -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-warning text-dark">
+          <i class="fas fa-trophy me-2"></i>Top 10 Produtos — Faturamento (6 meses)
+        </div>
+        <div class="card-body">
+          {% if top10_labels %}
+          <canvas id="chartTop10" height="130"></canvas>
+          {% else %}
+          <p class="text-muted text-center py-4">Sem dados de vendas.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-secondary text-white">
+          <i class="fas fa-calendar-week me-2"></i>Padrão por Dia da Semana (90 dias)
+        </div>
+        <div class="card-body">
+          <canvas id="chartSemana" height="130"></canvas>
+          <p class="text-muted small mt-2 mb-0">
+            <i class="fas fa-lightbulb me-1 text-warning"></i>
+            Identifica os dias de maior movimento para otimizar estoque e equipe.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gráfico 6: Giro de Estoque -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white">
+          <i class="fas fa-sync-alt me-2"></i>Índice de Giro de Estoque por Produto (6 meses)
+        </div>
+        <div class="card-body">
+          {% if giro_labels %}
+          <canvas id="chartGiro" height="80"></canvas>
+          <p class="text-muted small mt-2 mb-0">
+            <i class="fas fa-info-circle me-1"></i>
+            Giro = unidades vendidas ÷ estoque atual. Valores altos indicam alta rotatividade.
+            Produtos com giro baixo e estoque alto podem indicar excesso de compra.
+          </p>
+          {% else %}
+          <p class="text-muted text-center py-4">Sem dados suficientes para calcular giro.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ticket médio mensal -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-header" style="background:#6f42c1; color:#fff;">
+          <i class="fas fa-receipt me-2"></i>Ticket Médio por Mês (12 meses)
+        </div>
+        <div class="card-body">
+          {% if fat_labels %}
+          <canvas id="chartTicket" height="70"></canvas>
+          {% else %}
+          <p class="text-muted text-center py-4">Sem dados de vendas.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Nota metodológica -->
+  <div class="alert alert-light border mt-2 small">
+    <i class="fas fa-flask me-1 text-primary"></i>
+    <strong>Metodologia ML:</strong> Regressão Linear Simples (scikit-learn) treinada com histórico mensal de vendas (últimos 12 meses).
+    Variável independente: índice temporal do mês. Variável dependente: unidades vendidas.
+    Previsão gerada para os próximos 3 meses. Dados capturados via IoT (ESP32 + GM805) e sistema web.
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const TEAL   = 'rgba(13,110,253,0.85)';
+const GREEN  = 'rgba(25,135,84,0.85)';
+const ORANGE = 'rgba(253,126,20,0.85)';
+const RED    = 'rgba(220,53,69,0.85)';
+const PURPLE = 'rgba(111,66,193,0.85)';
+const CYAN   = 'rgba(13,202,240,0.85)';
+const YELLOW = 'rgba(255,193,7,0.85)';
+const GRAY   = 'rgba(108,117,125,0.85)';
+
+function moeda(v) { return 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits:2}); }
+
+// ── Gráfico 1: ML Previsão ─────────────────────────────────
+{% if ml_previsao and ml_previsao.historico %}
+(function(){
+  const lH = {{ ml_previsao.labels_hist | tojson }};
+  const lF = {{ ml_previsao.labels_futuros | tojson }};
+  const hist = {{ ml_previsao.historico | tojson }};
+  const prev = {{ ml_previsao.previsao | tojson }};
+  const labels = [...lH, ...lF];
+  const dadosHist = [...hist, ...Array(lF.length).fill(null)];
+  const dadosPrev = [...Array(lH.length - 1).fill(null), hist[hist.length-1], ...prev];
+
+  new Chart(document.getElementById('chartML'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Histórico (unidades vendidas)',
+          data: dadosHist,
+          borderColor: TEAL, backgroundColor: 'rgba(13,110,253,0.1)',
+          fill: true, tension: 0.3, pointRadius: 5, pointHoverRadius: 7,
+          borderWidth: 2,
+        },
+        {
+          label: 'Previsão ML (próx. 3 meses)',
+          data: dadosPrev,
+          borderColor: RED, backgroundColor: 'rgba(220,53,69,0.08)',
+          fill: false, tension: 0.3,
+          borderDash: [8, 4], pointRadius: 5, pointHoverRadius: 7,
+          borderWidth: 2,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top' },
+        tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.raw ?? '-') + ' un' } }
+      },
+      scales: { y: { beginAtZero: true, title: { display: true, text: 'Unidades' } } }
+    }
+  });
+})();
+{% endif %}
+
+// ── Gráfico 2: Faturamento Mensal ─────────────────────────
+{% if fat_labels %}
+(function(){
+  const labels = {{ fat_labels | tojson }};
+  const fat    = {{ fat_valores | tojson }};
+  const qtd    = {{ fat_qtd | tojson }};
+  new Chart(document.getElementById('chartFatMensal'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Faturamento (R$)',
+          data: fat,
+          backgroundColor: GREEN,
+          yAxisID: 'y',
+          order: 2,
+        },
+        {
+          label: 'Nº de Vendas',
+          data: qtd,
+          type: 'line',
+          borderColor: ORANGE, backgroundColor: 'transparent',
+          tension: 0.3, pointRadius: 4,
+          yAxisID: 'y2',
+          order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top' }, tooltip: { mode: 'index' } },
+      scales: {
+        y:  { beginAtZero: true, title: { display: true, text: 'R$' }, position: 'left' },
+        y2: { beginAtZero: true, title: { display: true, text: 'Vendas' }, position: 'right', grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+})();
+{% endif %}
+
+// ── Gráfico 3: Vendas Diárias ─────────────────────────────
+{% if vd_labels %}
+(function(){
+  const labels = {{ vd_labels | tojson }};
+  const fat    = {{ vd_fatura | tojson }};
+  const qtd    = {{ vd_vendas | tojson }};
+  new Chart(document.getElementById('chartDiario'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Faturamento diário (R$)',
+        data: fat,
+        backgroundColor: CYAN,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => moeda(ctx.raw) } } },
+      scales: { y: { beginAtZero: true }, x: { ticks: { maxTicksLimit: 10 } } }
+    }
+  });
+})();
+{% endif %}
+
+// ── Gráfico 4: Top 10 Produtos ────────────────────────────
+{% if top10_labels %}
+(function(){
+  const labels = {{ top10_labels | tojson }};
+  const fat    = {{ top10_fat | tojson }};
+  const qtd    = {{ top10_qtd | tojson }};
+  new Chart(document.getElementById('chartTop10'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Faturamento (R$)',
+        data: fat,
+        backgroundColor: YELLOW,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => moeda(ctx.raw) } } },
+      scales: { x: { beginAtZero: true } }
+    }
+  });
+})();
+{% endif %}
+
+// ── Gráfico 5: Dia da Semana ──────────────────────────────
+(function(){
+  const labels = {{ semana_labels | tojson }};
+  const fat    = {{ semana_fat | tojson }};
+  const qtd    = {{ semana_qtd | tojson }};
+  new Chart(document.getElementById('chartSemana'), {
+    type: 'radar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Faturamento (R$)',
+          data: fat,
+          backgroundColor: 'rgba(108,117,125,0.2)',
+          borderColor: GRAY,
+          pointBackgroundColor: GRAY,
+        },
+        {
+          label: 'Nº de Vendas',
+          data: qtd,
+          backgroundColor: 'rgba(111,66,193,0.15)',
+          borderColor: PURPLE,
+          pointBackgroundColor: PURPLE,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top' } },
+      scales: { r: { beginAtZero: true } }
+    }
+  });
+})();
+
+// ── Gráfico 6: Giro de Estoque ────────────────────────────
+{% if giro_labels %}
+(function(){
+  const labels  = {{ giro_labels | tojson }};
+  const estoque = {{ giro_estoque | tojson }};
+  const vendido = {{ giro_vendido | tojson }};
+  const giro    = {{ giro_indices | tojson }};
+  new Chart(document.getElementById('chartGiro'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Estoque atual',
+          data: estoque,
+          backgroundColor: 'rgba(13,110,253,0.5)',
+          stack: 'stack',
+          borderRadius: 3,
+        },
+        {
+          label: 'Vendido (6m)',
+          data: vendido,
+          backgroundColor: GREEN,
+          stack: 'stack',
+          borderRadius: 3,
+        },
+        {
+          label: 'Índice de Giro',
+          data: giro,
+          type: 'line',
+          borderColor: RED,
+          backgroundColor: 'transparent',
+          pointRadius: 5, tension: 0.3,
+          yAxisID: 'y2',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'top' }, tooltip: { mode: 'index' } },
+      scales: {
+        y:  { beginAtZero: true, stacked: true, title: { display: true, text: 'Unidades' } },
+        y2: { beginAtZero: true, position: 'right', title: { display: true, text: 'Giro' }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+})();
+{% endif %}
+
+// ── Gráfico 7: Ticket Médio Mensal ────────────────────────
+{% if fat_labels %}
+(function(){
+  const labels = {{ fat_labels | tojson }};
+  const ticket = {{ ticket_mensal | tojson }};
+  new Chart(document.getElementById('chartTicket'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Ticket Médio (R$)',
+        data: ticket,
+        borderColor: PURPLE,
+        backgroundColor: 'rgba(111,66,193,0.1)',
+        fill: true, tension: 0.4,
+        pointRadius: 5, pointHoverRadius: 7,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => moeda(ctx.raw) } } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: 'R$' } } }
+    }
+  });
+})();
+{% endif %}
+</script>
+{% endblock %}

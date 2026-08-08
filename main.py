@@ -682,6 +682,175 @@ async def dashboard(request: Request):
     })
 
 
+# --- ANALYTICS / ML AVANÇADO ---
+@app.get("/analytics", response_class=HTMLResponse)
+async def analytics(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+
+    with engine.connect() as conn:
+
+        # 1. Previsão de demanda (ML já existente)
+        ml_previsao = prever_demanda(conn)
+
+        # 2. Vendas diárias dos últimos 30 dias
+        try:
+            vendas_diarias = conn.execute(text("""
+                SELECT
+                    DATE(data_venda) AS dia,
+                    TO_CHAR(DATE(data_venda), 'DD/MM') AS dia_label,
+                    COUNT(DISTINCT grupo_venda) AS num_vendas,
+                    COALESCE(SUM(total), 0) AS faturamento
+                FROM vendas
+                WHERE data_venda >= CURRENT_DATE - INTERVAL '29 days'
+                GROUP BY DATE(data_venda)
+                ORDER BY dia
+            """)).fetchall()
+            vd_labels   = [r.dia_label   for r in vendas_diarias]
+            vd_vendas   = [int(r.num_vendas)     for r in vendas_diarias]
+            vd_fatura   = [float(r.faturamento)  for r in vendas_diarias]
+        except Exception:
+            vd_labels = vd_vendas = vd_fatura = []
+
+        # 3. Distribuição de vendas por dia da semana
+        try:
+            vendas_semana = conn.execute(text("""
+                SELECT
+                    EXTRACT(DOW FROM data_venda)::int AS dow,
+                    COALESCE(SUM(total), 0) AS faturamento,
+                    COUNT(*) AS num_vendas
+                FROM vendas
+                WHERE data_venda >= CURRENT_DATE - INTERVAL '90 days'
+                GROUP BY dow
+                ORDER BY dow
+            """)).fetchall()
+            dias_nomes = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]
+            semana_labels = dias_nomes
+            semana_fat_map = {r.dow: float(r.faturamento) for r in vendas_semana}
+            semana_fat = [semana_fat_map.get(i, 0) for i in range(7)]
+            semana_qtd_map = {r.dow: int(r.num_vendas) for r in vendas_semana}
+            semana_qtd = [semana_qtd_map.get(i, 0) for i in range(7)]
+        except Exception:
+            semana_labels = ["Dom","Seg","Ter","Qua","Qui","Sex","Sáb"]
+            semana_fat = semana_qtd = [0]*7
+
+        # 4. Top 10 produtos mais vendidos (últimos 6 meses) com faturamento
+        try:
+            top10 = conn.execute(text("""
+                SELECT p.nome, p.cor, p.tamanho,
+                       SUM(v.quantidade) AS qtd_vendida,
+                       COALESCE(SUM(v.total), 0) AS faturamento
+                FROM vendas v
+                JOIN produtos p ON v.produto_id = p.id
+                WHERE v.data_venda >= CURRENT_DATE - INTERVAL '180 days'
+                GROUP BY p.nome, p.cor, p.tamanho
+                ORDER BY faturamento DESC
+                LIMIT 10
+            """)).fetchall()
+            top10_labels = [f"{r.nome} {r.cor or ''} {r.tamanho or ''}".strip() for r in top10]
+            top10_qtd    = [float(r.qtd_vendida or 0) for r in top10]
+            top10_fat    = [float(r.faturamento or 0) for r in top10]
+        except Exception:
+            top10_labels = top10_qtd = top10_fat = []
+
+        # 5. Evolução mensal de faturamento (12 meses)
+        try:
+            fat_mensal = conn.execute(text("""
+                SELECT
+                    TO_CHAR(DATE_TRUNC('month', data_venda), 'MM/YYYY') AS mes,
+                    DATE_TRUNC('month', data_venda) AS mes_dt,
+                    COALESCE(SUM(total), 0) AS faturamento,
+                    COUNT(DISTINCT grupo_venda) AS num_vendas
+                FROM vendas
+                WHERE data_venda >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+                GROUP BY mes, mes_dt
+                ORDER BY mes_dt
+            """)).fetchall()
+            fat_labels  = [r.mes          for r in fat_mensal]
+            fat_valores = [float(r.faturamento)  for r in fat_mensal]
+            fat_qtd     = [int(r.num_vendas)      for r in fat_mensal]
+        except Exception:
+            fat_labels = fat_valores = fat_qtd = []
+
+        # 6. Ticket médio mensal
+        try:
+            ticket_mensal = [
+                round(fat_valores[i] / fat_qtd[i], 2) if fat_qtd[i] > 0 else 0
+                for i in range(len(fat_labels))
+            ]
+        except Exception:
+            ticket_mensal = []
+
+        # 7. Estoque vs. giro (produtos com maior e menor giro)
+        try:
+            giro = conn.execute(text("""
+                SELECT p.nome,
+                       p.quantidade AS estoque_atual,
+                       COALESCE(SUM(v.quantidade), 0) AS vendido_6m,
+                       CASE WHEN p.quantidade > 0
+                            THEN ROUND(COALESCE(SUM(v.quantidade),0) / p.quantidade, 2)
+                            ELSE 0 END AS giro
+                FROM produtos p
+                LEFT JOIN vendas v ON v.produto_id = p.id
+                    AND v.data_venda >= CURRENT_DATE - INTERVAL '180 days'
+                GROUP BY p.id, p.nome, p.quantidade
+                ORDER BY giro DESC
+                LIMIT 15
+            """)).fetchall()
+            giro_labels   = [r.nome                    for r in giro]
+            giro_estoque  = [float(r.estoque_atual or 0) for r in giro]
+            giro_vendido  = [float(r.vendido_6m or 0)   for r in giro]
+            giro_indices  = [float(r.giro or 0)          for r in giro]
+        except Exception:
+            giro_labels = giro_estoque = giro_vendido = giro_indices = []
+
+        # 8. KPIs analíticos
+        try:
+            kpi = conn.execute(text("""
+                SELECT
+                    COUNT(DISTINCT grupo_venda)                          AS total_transacoes,
+                    COALESCE(SUM(total), 0)                              AS faturamento_total,
+                    COALESCE(AVG(total), 0)                              AS ticket_medio_geral,
+                    COALESCE(SUM(quantidade), 0)                         AS unidades_vendidas,
+                    COUNT(DISTINCT produto_id)                           AS produtos_distintos
+                FROM vendas
+                WHERE data_venda >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '11 months'
+            """)).fetchone()
+            kpis = {
+                "transacoes":        int(kpi.total_transacoes or 0),
+                "faturamento":       float(kpi.faturamento_total or 0),
+                "ticket_medio":      round(float(kpi.ticket_medio_geral or 0), 2),
+                "unidades_vendidas": float(kpi.unidades_vendidas or 0),
+                "produtos_distintos": int(kpi.produtos_distintos or 0),
+            }
+        except Exception:
+            kpis = {"transacoes": 0, "faturamento": 0, "ticket_medio": 0, "unidades_vendidas": 0, "produtos_distintos": 0}
+
+    return templates.TemplateResponse(request, "analytics.html", {
+        "user": user,
+        "ml_previsao": ml_previsao,
+        "vd_labels": vd_labels,
+        "vd_vendas": vd_vendas,
+        "vd_fatura": vd_fatura,
+        "semana_labels": semana_labels,
+        "semana_fat": semana_fat,
+        "semana_qtd": semana_qtd,
+        "top10_labels": top10_labels,
+        "top10_qtd": top10_qtd,
+        "top10_fat": top10_fat,
+        "fat_labels": fat_labels,
+        "fat_valores": fat_valores,
+        "fat_qtd": fat_qtd,
+        "ticket_mensal": ticket_mensal,
+        "giro_labels": giro_labels,
+        "giro_estoque": giro_estoque,
+        "giro_vendido": giro_vendido,
+        "giro_indices": giro_indices,
+        "kpis": kpis,
+    })
+
+
 # --- EXPORTAÇÃO CSV ---
 @app.get("/relatorio/csv")
 async def exportar_csv(request: Request):
