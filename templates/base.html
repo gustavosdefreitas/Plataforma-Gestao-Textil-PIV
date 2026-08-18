@@ -70,14 +70,16 @@
                     </li>
                     {% endif %}
                 </ul>
-                <div class="navbar-nav">
-                    <span class="nav-link text-white d-none d-lg-block">
+                <div class="navbar-nav align-items-center">
+                    <span class="nav-link text-white me-2">
                         <i class="fas fa-user-circle me-1" aria-hidden="true"></i> {{ user.username }}
                         {% if user.perfil == 'admin' %}
                         <span class="badge bg-warning text-dark ms-1" style="font-size:0.65rem;">admin</span>
                         {% endif %}
                     </span>
-                    <a class="nav-link btn btn-outline-light btn-sm ms-lg-3 px-3" href="/logout">Sair</a>
+                    <a class="btn btn-danger btn-sm px-3" href="/logout">
+                        <i class="fas fa-sign-out-alt me-1" aria-hidden="true"></i> Sair
+                    </a>
                 </div>
             </div>
         </div>
