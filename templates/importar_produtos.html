@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Importar Produtos{% endblock %}
+{% block content %}
+<div class="container" style="max-width:640px;">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <h4 class="fw-bold mb-0"><i class="fas fa-file-upload me-2 text-primary"></i>Importar Produtos</h4>
+        <a href="/produtos" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Voltar
+        </a>
+    </div>
+
+    {% if erro_global %}
+    <div class="alert alert-danger"><i class="fas fa-times-circle me-2"></i>{{ erro_global }}</div>
+    {% endif %}
+
+    {% if inseridos is defined %}
+    <div class="alert alert-success">
+        <i class="fas fa-check-circle me-2"></i>
+        <strong>{{ inseridos }}</strong> produto(s) importado(s) com sucesso.
+        {% if ignorados %} <span class="text-muted">| {{ ignorados }} linha(s) ignorada(s) (sem nome).</span>{% endif %}
+    </div>
+    {% if erros %}
+    <div class="alert alert-warning">
+        <strong>{{ erros|length }} erro(s):</strong>
+        <ul class="mb-0 mt-1 small">
+            {% for e in erros %}<li>{{ e }}</li>{% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <!-- Formulário de upload -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold py-2">
+            <i class="fas fa-upload me-2 text-primary"></i>Selecionar Arquivo
+        </div>
+        <div class="card-body">
+            <form method="post" action="/produtos/importar" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Arquivo Excel (.xlsx) ou CSV (.csv)</label>
+                    <input type="file" name="arquivo" class="form-control" accept=".xlsx,.xls,.csv" required>
+                </div>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-file-import me-1"></i>Importar
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modelo de planilha -->
+    <div class="card shadow-sm">
+        <div class="card-header bg-white fw-semibold py-2">
+            <i class="fas fa-table me-2 text-secondary"></i>Formato esperado da planilha
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>nome <span class="text-danger">*</span></th>
+                            <th>quantidade</th>
+                            <th>preco</th>
+                            <th>cor</th>
+                            <th>tamanho</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Tecido Oxford Azul</td>
+                            <td>50</td>
+                            <td>29.90</td>
+                            <td>Azul</td>
+                            <td>M</td>
+                        </tr>
+                        <tr>
+                            <td>Malha Fria Branca</td>
+                            <td>30</td>
+                            <td>15.50</td>
+                            <td>Branco</td>
+                            <td>G</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted small px-3 py-2 mb-0">
+                <i class="fas fa-info-circle me-1"></i>
+                Apenas <strong>nome</strong> é obrigatório. As demais colunas são opcionais. O cabeçalho deve estar na primeira linha.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

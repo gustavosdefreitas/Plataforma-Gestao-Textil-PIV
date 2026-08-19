@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Form, Request, Query
+from fastapi import FastAPI, Form, Request, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from io import BytesIO, StringIO
 import csv
@@ -1146,6 +1146,76 @@ async def editar_produto(
 
     return RedirectResponse(url="/produtos?msg=produto_atualizado", status_code=303)
 
+# --- IMPORTAÇÃO DE PRODUTOS ---
+@app.get("/produtos/importar", response_class=HTMLResponse)
+async def importar_produtos_get(request: Request):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse(request, "importar_produtos.html", {"user": user})
+
+
+@app.post("/produtos/importar")
+async def importar_produtos_post(request: Request, arquivo: UploadFile = File(...)):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse(url="/login", status_code=303)
+
+    conteudo = await arquivo.read()
+    erros = []
+    inseridos = 0
+    ignorados = 0
+
+    try:
+        if arquivo.filename.endswith(".csv"):
+            df = pd.read_csv(BytesIO(conteudo), dtype=str)
+        else:
+            df = pd.read_excel(BytesIO(conteudo), dtype=str)
+
+        # Normalizar colunas
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        colunas_req = {"nome"}
+        if not colunas_req.issubset(set(df.columns)):
+            return templates.TemplateResponse(request, "importar_produtos.html", {
+                "user": user,
+                "erro_global": f"Coluna obrigatória 'nome' não encontrada. Colunas encontradas: {list(df.columns)}"
+            })
+
+        with engine.connect() as conn:
+            for i, row in df.iterrows():
+                nome = str(row.get("nome", "")).strip()
+                if not nome or nome == "nan":
+                    ignorados += 1
+                    continue
+                try:
+                    quantidade = float(str(row.get("quantidade", "0")).replace(",", ".")) if str(row.get("quantidade", "")) not in ["", "nan"] else 0
+                    preco = float(str(row.get("preco", "0")).replace(",", ".").replace("R$", "").strip()) if str(row.get("preco", "")) not in ["", "nan"] else 0
+                    cor = str(row.get("cor", "")).strip() if str(row.get("cor", "")) != "nan" else ""
+                    tamanho = str(row.get("tamanho", "")).strip() if str(row.get("tamanho", "")) != "nan" else ""
+                    conn.execute(text("""
+                        INSERT INTO produtos (nome, quantidade, preco, cor, tamanho)
+                        VALUES (:nome, :quantidade, :preco, :cor, :tamanho)
+                    """), {"nome": nome, "quantidade": quantidade, "preco": preco, "cor": cor, "tamanho": tamanho})
+                    inseridos += 1
+                except Exception as e:
+                    erros.append(f"Linha {i+2}: {str(e)[:80]}")
+            conn.commit()
+
+        registrar_log(user.id, user.username, "IMPORTAR_PRODUTOS", f"{inseridos} produtos importados, {ignorados} ignorados, {len(erros)} erros")
+
+    except Exception as e:
+        return templates.TemplateResponse(request, "importar_produtos.html", {
+            "user": user, "erro_global": f"Erro ao ler arquivo: {str(e)}"
+        })
+
+    return templates.TemplateResponse(request, "importar_produtos.html", {
+        "user": user,
+        "inseridos": inseridos,
+        "ignorados": ignorados,
+        "erros": erros
+    })
+
+
 @app.get("/produtos/deletar/{id}")
 async def deletar_produto(request: Request, id: int):
     user = get_current_user(request)
@@ -1409,6 +1479,74 @@ async def novo_fornecedor(
         conn.commit()
 
     return RedirectResponse(url="/fornecedores?msg=fornecedor_criado", status_code=303)
+
+# --- IMPORTAÇÃO DE FORNECEDORES ---
+@app.get("/fornecedores/importar", response_class=HTMLResponse)
+async def importar_fornecedores_get(request: Request):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse(request, "importar_fornecedores.html", {"user": user})
+
+
+@app.post("/fornecedores/importar")
+async def importar_fornecedores_post(request: Request, arquivo: UploadFile = File(...)):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse(url="/login", status_code=303)
+
+    conteudo = await arquivo.read()
+    erros = []
+    inseridos = 0
+    ignorados = 0
+
+    try:
+        if arquivo.filename.endswith(".csv"):
+            df = pd.read_csv(BytesIO(conteudo), dtype=str)
+        else:
+            df = pd.read_excel(BytesIO(conteudo), dtype=str)
+
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        if "nome" not in df.columns:
+            return templates.TemplateResponse(request, "importar_fornecedores.html", {
+                "user": user,
+                "erro_global": f"Coluna obrigatória 'nome' não encontrada. Colunas: {list(df.columns)}"
+            })
+
+        with engine.connect() as conn:
+            for i, row in df.iterrows():
+                nome = str(row.get("nome", "")).strip()
+                if not nome or nome == "nan":
+                    ignorados += 1
+                    continue
+                try:
+                    cnpj = str(row.get("cnpj", "")).strip() if str(row.get("cnpj", "")) != "nan" else ""
+                    telefone = str(row.get("telefone", "")).strip() if str(row.get("telefone", "")) != "nan" else ""
+                    email = str(row.get("email", "")).strip() if str(row.get("email", "")) != "nan" else ""
+                    situacao = str(row.get("situacao_cadastral", "Ativo")).strip() if str(row.get("situacao_cadastral", "")) != "nan" else "Ativo"
+                    conn.execute(text("""
+                        INSERT INTO fornecedores (nome, cnpj, telefone, email, situacao_cadastral)
+                        VALUES (:nome, :cnpj, :telefone, :email, :situacao)
+                    """), {"nome": nome, "cnpj": cnpj, "telefone": telefone, "email": email, "situacao": situacao})
+                    inseridos += 1
+                except Exception as e:
+                    erros.append(f"Linha {i+2}: {str(e)[:80]}")
+            conn.commit()
+
+        registrar_log(user.id, user.username, "IMPORTAR_FORNECEDORES", f"{inseridos} fornecedores importados, {ignorados} ignorados, {len(erros)} erros")
+
+    except Exception as e:
+        return templates.TemplateResponse(request, "importar_fornecedores.html", {
+            "user": user, "erro_global": f"Erro ao ler arquivo: {str(e)}"
+        })
+
+    return templates.TemplateResponse(request, "importar_fornecedores.html", {
+        "user": user,
+        "inseridos": inseridos,
+        "ignorados": ignorados,
+        "erros": erros
+    })
+
 
 @app.get("/fornecedores/deletar/{id}")
 async def deletar_fornecedor(request: Request, id: int):
