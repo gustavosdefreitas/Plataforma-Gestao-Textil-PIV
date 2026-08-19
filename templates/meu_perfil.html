@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Meu Perfil{% endblock %}
+{% block content %}
+<div class="container" style="max-width:560px;">
+    <div class="d-flex align-items-center mb-4 gap-3">
+        <div style="width:56px;height:56px;border-radius:50%;background:#0d6efd;display:flex;align-items:center;justify-content:center;">
+            <i class="fas fa-user fa-xl text-white"></i>
+        </div>
+        <div>
+            <h4 class="mb-0 fw-bold">Meu Perfil</h4>
+            <span class="text-muted small">{{ dados.username }}
+                {% if dados.perfil == 'admin' %}
+                <span class="badge bg-warning text-dark ms-1">admin</span>
+                {% else %}
+                <span class="badge bg-secondary ms-1">user</span>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+
+    {% if request.query_params.get('ok') %}
+    <div class="alert alert-success d-flex align-items-center gap-2 py-2">
+        <i class="fas fa-check-circle"></i> Perfil atualizado com sucesso.
+    </div>
+    {% endif %}
+
+    {% if erros %}
+    <div class="alert alert-danger py-2">
+        {% for e in erros %}<div><i class="fas fa-exclamation-circle me-1"></i>{{ e }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold py-2">
+            <i class="fas fa-id-card me-2 text-primary"></i>Dados Pessoais
+        </div>
+        <div class="card-body">
+            <form method="post" action="/meu-perfil">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Usuário</label>
+                    <input type="text" class="form-control form-control-sm bg-light" value="{{ dados.username }}" disabled>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Nome Completo</label>
+                    <input type="text" name="nome_completo" class="form-control form-control-sm"
+                           value="{{ dados.nome_completo or '' }}" placeholder="Seu nome completo">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">CPF</label>
+                    <input type="text" name="cpf" class="form-control form-control-sm"
+                           value="{{ dados.cpf or '' }}" placeholder="000.000.000-00">
+                </div>
+
+                <hr class="my-3">
+                <p class="small text-muted mb-2"><i class="fas fa-lock me-1"></i>Alterar senha <span class="text-muted">(deixe em branco para não alterar)</span></p>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Senha Atual</label>
+                    <input type="password" name="senha_atual" class="form-control form-control-sm" placeholder="••••••••">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Nova Senha</label>
+                    <input type="password" name="nova_senha" class="form-control form-control-sm" placeholder="••••••••">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-semibold">Confirmar Nova Senha</label>
+                    <input type="password" name="confirmar_senha" class="form-control form-control-sm" placeholder="••••••••">
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm px-4">
+                        <i class="fas fa-save me-1"></i>Salvar
+                    </button>
+                    <a href="/" class="btn btn-outline-secondary btn-sm px-3">Cancelar</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

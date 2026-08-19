@@ -416,6 +416,62 @@ async def login(request: Request, username: str = Form(...), password: str = For
         "error": "Credenciais Inválidas"
     })
 
+@app.get("/meu-perfil")
+async def meu_perfil(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id, username, nome_completo, cpf, perfil, session_id FROM usuarios WHERE id = :id"),
+            {"id": user.id}
+        ).fetchone()
+    return templates.TemplateResponse(request, "meu_perfil.html", {"user": user, "dados": row})
+
+
+@app.post("/meu-perfil")
+async def meu_perfil_salvar(
+    request: Request,
+    nome_completo: str = Form(""),
+    cpf: str = Form(""),
+    senha_atual: str = Form(""),
+    nova_senha: str = Form(""),
+    confirmar_senha: str = Form("")):
+    user = get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    erros = []
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id, username, nome_completo, cpf, perfil, password FROM usuarios WHERE id = :id"),
+            {"id": user.id}
+        ).fetchone()
+        # Atualizar dados básicos
+        novo_nome = nome_completo.strip() or row.nome_completo
+        novo_cpf  = cpf.strip() or row.cpf
+        # Troca de senha (opcional)
+        novo_hash = row.password
+        if nova_senha:
+            import hashlib
+            if not senha_atual:
+                erros.append("Informe a senha atual para alterar a senha.")
+            elif hashlib.sha256(senha_atual.encode()).hexdigest() != row.password:
+                erros.append("Senha atual incorreta.")
+            elif nova_senha != confirmar_senha:
+                erros.append("Nova senha e confirmação não coincidem.")
+            else:
+                novo_hash = hashlib.sha256(nova_senha.encode()).hexdigest()
+        if erros:
+            return templates.TemplateResponse(request, "meu_perfil.html", {"user": user, "dados": row, "erros": erros})
+        conn.execute(
+            text("UPDATE usuarios SET nome_completo=:nome, cpf=:cpf, password=:pwd WHERE id=:id"),
+            {"nome": novo_nome, "cpf": novo_cpf, "pwd": novo_hash, "id": user.id}
+        )
+        conn.commit()
+        registrar_log(user.id, user.username, "EDITAR_PERFIL", "Usuário atualizou seu perfil")
+    return RedirectResponse(url="/meu-perfil?ok=1", status_code=303)
+
+
 @app.get("/logout")
 async def logout(request: Request):
     user = get_current_user(request)

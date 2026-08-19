@@ -73,12 +73,12 @@
                     {% endif %}
                 </ul>
                 <div class="navbar-nav align-items-center gap-2">
-                    <span class="text-white navbar-user d-none d-xl-inline">
+                    <a href="/meu-perfil" class="text-white text-decoration-none navbar-user d-none d-xl-inline" title="Meu Perfil">
                         <i class="fas fa-user-circle me-1" aria-hidden="true"></i>{{ user.username }}
                         {% if user.perfil == 'admin' %}
                         <span class="badge bg-warning text-dark ms-1" style="font-size:0.6rem;">admin</span>
                         {% endif %}
-                    </span>
+                    </a>
                     <a class="btn btn-logout" href="/logout" style="background-color:#e53935;color:#fff;border:none;">
                         <i class="fas fa-sign-out-alt me-1" aria-hidden="true"></i>Sair
                     </a>
