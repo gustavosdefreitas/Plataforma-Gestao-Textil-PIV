@@ -55,7 +55,7 @@
                 <tbody>
                     {% for log in logs %}
                     <tr>
-                        <td class="ps-3 small text-muted">{{ log.data_evento }}</td>
+                        <td class="ps-3 small text-muted" style="white-space:nowrap;">{{ log.data_evento.strftime('%d/%m/%Y %H:%M:%S') if log.data_evento else '-' }}</td>
                         <td>{{ log.username or '-' }}</td>
                         <td><span class="badge bg-secondary">{{ log.acao }}</span></td>
                         <td>{{ log.detalhes or '-' }}</td>
