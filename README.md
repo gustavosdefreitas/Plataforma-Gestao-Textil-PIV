@@ -3,6 +3,8 @@
 > Projeto Integrador IV — UNIVESP (PJI410)  
 > Análise de dados em escala · Machine Learning · IoT · NF-e · Etiquetas · Visualização · Nuvem
 
+**Versão atual: v1.2.2**
+
 Sistema web full-stack para controle de estoque e vendas com camada de inteligência artificial, leitura de Nota Fiscal Eletrônica via QR Code e integração IoT com ESP32 + leitor de código de barras.
 
 ---
@@ -14,7 +16,9 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 - **Venda por scanner USB** — campo de scan na tela de vendas compatível com leitores USB HID (ex: Obitech MHT-U4)
 - **Integração IoT (ESP32 + GM805)** — firmware MicroPython para ESP32 com leitor de barcode UART; registra venda e decrementa estoque em tempo real via Wi-Fi
 - **Previsão de demanda (ML)** — regressão linear com scikit-learn, previsão para os próximos 3 meses com indicador R²
-- **Dashboard ML** — gráfico de linha com histórico real vs. previsão do modelo
+- **Dashboard Analytics ML** — 7 gráficos interativos: previsão de demanda, faturamento mensal, vendas diárias, top 10 produtos, padrão por dia da semana, giro de estoque e ticket médio
+- **Importação em massa** — upload de planilha Excel/CSV para cadastrar produtos e fornecedores em lote, com detecção automática de duplicatas por nome e CNPJ; modelos CSV disponíveis para download
+- **Perfil do usuário** — página `/meu-perfil` para edição de nome, CPF e senha; acessível pelo clique no nome no navbar
 
 ## Funcionalidades PI III (Base)
 
@@ -24,6 +28,21 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 - Banco de horas por usuário
 - Acessibilidade WCAG 2.1 AA
 - API REST para integração externa
+
+---
+
+## Histórico de Versões
+
+| Versão | Data | Descrição |
+|---|---|---|
+| v1.0.0 | Mai/2026 | Versão base — CRUD, vendas, IoT, NF-e, ML |
+| v1.0.1 | Ago/2026 | Fix navbar layout — textos curtos, nowrap |
+| v1.0.2 | Ago/2026 | Botão Sair em vermelho destacado |
+| v1.0.3 | Ago/2026 | Data/hora nos logs formatada (dd/mm/aaaa hh:mm:ss) |
+| v1.1.0 | Ago/2026 | Página /meu-perfil com edição de dados e senha |
+| v1.2.0 | Ago/2026 | Importação de produtos e fornecedores via Excel/CSV |
+| v1.2.1 | Ago/2026 | Importação ignora duplicatas por nome e CNPJ |
+| v1.2.2 | Ago/2026 | Modelos CSV para download nas páginas de importação |
 
 ---
 
@@ -185,6 +204,13 @@ SERVER_URL   = "http://192.168.X.X:8000"  # IP do PC na rede local
 | `GET` | `/produtos/{id}/etiqueta/pdf` | Download da etiqueta em PDF (A6) |
 | `GET` | `/api/produto/scan/{codigo}` | Busca produto pelo código (scanner USB) |
 | `POST` | `/api/venda/scanner` | Registra venda via ESP32 (IoT) |
+| `GET` | `/analytics` | Dashboard Analytics ML (7 gráficos) |
+| `GET` | `/meu-perfil` | Página de perfil do usuário logado |
+| `POST` | `/meu-perfil` | Salva alterações de perfil e senha |
+| `GET` | `/produtos/importar` | Tela de importação de produtos via CSV/Excel |
+| `POST` | `/produtos/importar` | Processa upload e importa produtos |
+| `GET` | `/fornecedores/importar` | Tela de importação de fornecedores via CSV/Excel |
+| `POST` | `/fornecedores/importar` | Processa upload e importa fornecedores |
 
 ---
 
