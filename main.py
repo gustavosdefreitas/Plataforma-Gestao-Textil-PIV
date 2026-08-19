@@ -1188,6 +1188,15 @@ async def importar_produtos_post(request: Request, arquivo: UploadFile = File(..
                     ignorados += 1
                     continue
                 try:
+                    # Verificar duplicata por nome
+                    existe = conn.execute(
+                        text("SELECT id FROM produtos WHERE LOWER(nome) = LOWER(:nome)"),
+                        {"nome": nome}
+                    ).fetchone()
+                    if existe:
+                        ignorados += 1
+                        erros.append(f"Linha {i+2}: produto '{nome}' já existe (ignorado)")
+                        continue
                     quantidade = float(str(row.get("quantidade", "0")).replace(",", ".")) if str(row.get("quantidade", "")) not in ["", "nan"] else 0
                     preco = float(str(row.get("preco", "0")).replace(",", ".").replace("R$", "").strip()) if str(row.get("preco", "")) not in ["", "nan"] else 0
                     cor = str(row.get("cor", "")).strip() if str(row.get("cor", "")) != "nan" else ""
@@ -1521,6 +1530,21 @@ async def importar_fornecedores_post(request: Request, arquivo: UploadFile = Fil
                     continue
                 try:
                     cnpj = str(row.get("cnpj", "")).strip() if str(row.get("cnpj", "")) != "nan" else ""
+                    # Verificar duplicata por nome ou CNPJ
+                    if cnpj:
+                        existe = conn.execute(
+                            text("SELECT id FROM fornecedores WHERE LOWER(nome) = LOWER(:nome) OR cnpj = :cnpj"),
+                            {"nome": nome, "cnpj": cnpj}
+                        ).fetchone()
+                    else:
+                        existe = conn.execute(
+                            text("SELECT id FROM fornecedores WHERE LOWER(nome) = LOWER(:nome)"),
+                            {"nome": nome}
+                        ).fetchone()
+                    if existe:
+                        ignorados += 1
+                        erros.append(f"Linha {i+2}: fornecedor '{nome}' já existe (ignorado)")
+                        continue
                     telefone = str(row.get("telefone", "")).strip() if str(row.get("telefone", "")) != "nan" else ""
                     email = str(row.get("email", "")).strip() if str(row.get("email", "")) != "nan" else ""
                     situacao = str(row.get("situacao_cadastral", "Ativo")).strip() if str(row.get("situacao_cadastral", "")) != "nan" else "Ativo"
