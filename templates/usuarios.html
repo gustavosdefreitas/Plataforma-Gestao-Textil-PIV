@@ -103,9 +103,9 @@
                                                    placeholder="Nome completo do usuário">
                                         </div>
                                         <div class="mb-3">
-                                            <label for="edit_cpf_{{ u.id }}" class="form-label fw-bold">CPF</label>
+                                            <label for="edit_cpf_{{ u.id }}" class="form-label fw-bold">CPF <span class="text-muted fw-normal">(opcional)</span></label>
                                             <input type="text" id="edit_cpf_{{ u.id }}" name="cpf"
-                                                   value="{{ u.cpf or '' }}" class="form-control" required
+                                                   value="{{ u.cpf or '' }}" class="form-control"
                                                    placeholder="000.000.000-00" maxlength="14"
                                                    oninput="mascararCPF(this)">
                                             <div class="invalid-feedback">CPF inválido. Verifique os dígitos.</div>
@@ -170,9 +170,9 @@
                 </div>
 
                 <div class="mb-3">
-                    <label for="novo_usuario_cpf" class="form-label fw-bold">CPF</label>
+                    <label for="novo_usuario_cpf" class="form-label fw-bold">CPF <span class="text-muted fw-normal">(opcional)</span></label>
                     <input type="text" id="novo_usuario_cpf" name="cpf"
-                           class="form-control" required
+                           class="form-control"
                            placeholder="000.000.000-00" maxlength="14"
                            oninput="mascararCPF(this)">
                     <div class="invalid-feedback">CPF inválido. Verifique os dígitos.</div>
@@ -243,6 +243,11 @@ function validarCPF(cpf) {
 function validarFormulario(form) {
     const cpfInput = form.querySelector('input[name="cpf"]');
     if (!cpfInput) return true;
+    // CPF é opcional: só valida quando algum dígito foi informado
+    if (cpfInput.value.replace(/\D/g, '') === '') {
+        cpfInput.classList.remove('is-invalid');
+        return true;
+    }
     if (!validarCPF(cpfInput.value)) {
         cpfInput.classList.add('is-invalid');
         cpfInput.focus();

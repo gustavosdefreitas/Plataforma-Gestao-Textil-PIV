@@ -1274,7 +1274,7 @@ async def novo_usuario(
     request: Request,
     username: str = Form(...),
     nome_completo: str = Form(...),
-    cpf: str = Form(...),
+    cpf: str = Form(""),
     password: str = Form(...),
     perfil: str = Form(...)):
 
@@ -1282,10 +1282,14 @@ async def novo_usuario(
     if not user or user.perfil != "admin":
         return RedirectResponse(url="/", status_code=303)
 
-    if not validar_cpf(cpf):
-        return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
-
-    cpf_formatado = formatar_cpf(cpf)
+    # CPF é opcional: valida somente quando informado
+    cpf = (cpf or "").strip()
+    if cpf:
+        if not validar_cpf(cpf):
+            return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
+        cpf_formatado = formatar_cpf(cpf)
+    else:
+        cpf_formatado = None
 
     try:
         with engine.connect() as conn:
@@ -1325,7 +1329,7 @@ async def editar_usuario(
     request: Request,
     username: str = Form(...),
     nome_completo: str = Form(...),
-    cpf: str = Form(...),
+    cpf: str = Form(""),
     perfil: str = Form(...),
     password: str = Form(None)):
 
@@ -1333,10 +1337,14 @@ async def editar_usuario(
     if not user or user.perfil != "admin":
         return RedirectResponse(url="/", status_code=303)
 
-    if not validar_cpf(cpf):
-        return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
-
-    cpf_formatado = formatar_cpf(cpf)
+    # CPF é opcional: valida somente quando informado
+    cpf = (cpf or "").strip()
+    if cpf:
+        if not validar_cpf(cpf):
+            return RedirectResponse(url="/usuarios?erro=CPF+inv%C3%A1lido", status_code=303)
+        cpf_formatado = formatar_cpf(cpf)
+    else:
+        cpf_formatado = None
 
     with engine.connect() as conn:
         if password:
