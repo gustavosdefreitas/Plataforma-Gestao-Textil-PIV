@@ -3,7 +3,7 @@
 > Projeto Integrador IV — UNIVESP (PJI410)  
 > Análise de dados em escala · Machine Learning · IoT · NF-e · Etiquetas · Visualização · Nuvem
 
-**Versão atual: v1.2.2**
+**Versão atual: v1.3.0**
 
 Sistema web full-stack para controle de estoque e vendas com camada de inteligência artificial, leitura de Nota Fiscal Eletrônica via QR Code e integração IoT com ESP32 + leitor de código de barras.
 
@@ -43,6 +43,8 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 | v1.2.0 | Ago/2026 | Importação de produtos e fornecedores via Excel/CSV |
 | v1.2.1 | Ago/2026 | Importação ignora duplicatas por nome e CNPJ |
 | v1.2.2 | Ago/2026 | Modelos CSV para download nas páginas de importação |
+| v1.2.3 | Set/2026 | CPF opcional no cadastro e edição de usuários |
+| v1.3.0 | Set/2026 | Importação de produtos vincula fornecedor (por CNPJ ou nome) e empresa; novas colunas `fornecedor`, `fornecedor_cnpj` e `empresa` |
 
 ---
 

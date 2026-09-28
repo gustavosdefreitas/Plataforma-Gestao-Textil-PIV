@@ -63,6 +63,9 @@
                             <th>preco</th>
                             <th>cor</th>
                             <th>tamanho</th>
+                            <th>fornecedor</th>
+                            <th>fornecedor_cnpj</th>
+                            <th>empresa</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -72,6 +75,9 @@
                             <td>29.90</td>
                             <td>Azul</td>
                             <td>M</td>
+                            <td>Cia. Hering</td>
+                            <td>78.876.950/0001-71</td>
+                            <td></td>
                         </tr>
                         <tr>
                             <td>Malha Fria Branca</td>
@@ -79,13 +85,19 @@
                             <td>15.50</td>
                             <td>Branco</td>
                             <td>G</td>
+                            <td>Malwee Malhas</td>
+                            <td></td>
+                            <td></td>
                         </tr>
                     </tbody>
                 </table>
             </div>
             <p class="text-muted small px-3 py-2 mb-0">
                 <i class="fas fa-info-circle me-1"></i>
-                Apenas <strong>nome</strong> é obrigatório. As demais colunas são opcionais. O cabeçalho deve estar na primeira linha.
+                Apenas <strong>nome</strong> é obrigatório. As demais colunas são opcionais. O cabeçalho deve estar na primeira linha.<br>
+                <i class="fas fa-link me-1"></i>
+                <strong>fornecedor</strong> / <strong>fornecedor_cnpj</strong>: vinculam o produto a um fornecedor já cadastrado (o CNPJ tem prioridade). Importe os fornecedores antes.
+                <strong>empresa</strong>: nome fantasia da empresa; se ficar em branco, o produto é vinculado à primeira empresa cadastrada.
             </p>
         </div>
     </div>

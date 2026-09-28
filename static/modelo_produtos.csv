@@ -1,6 +1,5 @@
-nome,quantidade,preco,cor,tamanho
-Tecido Oxford Azul,50,29.90,Azul,M
-Malha Fria Branca,30,15.50,Branco,G
-Tecido Jeans Preto,20,45.00,Preto,GG
-Viscose Estampada,15,22.00,Rosa,P
-Moletom Cinza,40,38.90,Cinza,XG
+nome,quantidade,preco,cor,tamanho,fornecedor,fornecedor_cnpj,empresa
+Camiseta Básica Algodão,50,39.90,Branco,M,Cia. Hering,78.876.950/0001-71,
+Vestido Midi Viscose,20,129.90,Preto,P,Malwee Malhas,84.429.737/0001-14,
+Linha para Costura 120,100,4.50,Branco,500m,Linhas Setta,60.887.189/0001-08,
+Zíper Nylon Destacável,80,6.90,Preto,60cm,YKK do Brasil,43.444.348/0001-80,

@@ -1181,13 +1181,49 @@ async def importar_produtos_post(request: Request, arquivo: UploadFile = File(..
                 "erro_global": f"Coluna obrigatória 'nome' não encontrada. Colunas encontradas: {list(df.columns)}"
             })
 
+        def _val(row, col):
+            v = str(row.get(col, "")).strip()
+            return "" if v.lower() == "nan" else v
+
         with engine.connect() as conn:
+            # Mapas para vincular fornecedor (por CNPJ ou nome) e empresa (por nome fantasia)
+            forn_rows = conn.execute(text("SELECT id, nome, cnpj FROM fornecedores")).fetchall()
+            forn_por_cnpj = {re.sub(r"\D", "", f.cnpj or ""): f.id for f in forn_rows if f.cnpj}
+            forn_por_nome = {(f.nome or "").strip().lower(): f.id for f in forn_rows}
+            emp_rows = conn.execute(text("SELECT id, nome_fantasia FROM empresas ORDER BY id")).fetchall()
+            emp_por_nome = {(e.nome_fantasia or "").strip().lower(): e.id for e in emp_rows}
+            # Sem coluna 'empresa', o produto vai para a primeira empresa cadastrada,
+            # garantindo que apareça no dashboard, nas etiquetas e na exportação
+            empresa_padrao = emp_rows[0].id if emp_rows else None
+
             for i, row in df.iterrows():
                 nome = str(row.get("nome", "")).strip()
                 if not nome or nome == "nan":
                     ignorados += 1
                     continue
                 try:
+                    # Vincular fornecedor: CNPJ tem prioridade sobre o nome
+                    fornecedor_id = None
+                    f_cnpj = re.sub(r"\D", "", _val(row, "fornecedor_cnpj"))
+                    f_nome = _val(row, "fornecedor")
+                    if f_cnpj or f_nome:
+                        fornecedor_id = forn_por_cnpj.get(f_cnpj) if f_cnpj else None
+                        if fornecedor_id is None and f_nome:
+                            fornecedor_id = forn_por_nome.get(f_nome.lower())
+                        if fornecedor_id is None:
+                            ignorados += 1
+                            erros.append(f"Linha {i+2}: fornecedor '{f_nome or f_cnpj}' não cadastrado — importe os fornecedores antes (ignorado)")
+                            continue
+                    # Vincular empresa
+                    e_nome = _val(row, "empresa")
+                    if e_nome:
+                        empresa_id = emp_por_nome.get(e_nome.lower())
+                        if empresa_id is None:
+                            ignorados += 1
+                            erros.append(f"Linha {i+2}: empresa '{e_nome}' não cadastrada (ignorado)")
+                            continue
+                    else:
+                        empresa_id = empresa_padrao
                     # Verificar duplicata por nome
                     existe = conn.execute(
                         text("SELECT id FROM produtos WHERE LOWER(nome) = LOWER(:nome)"),
@@ -1202,9 +1238,10 @@ async def importar_produtos_post(request: Request, arquivo: UploadFile = File(..
                     cor = str(row.get("cor", "")).strip() if str(row.get("cor", "")) != "nan" else ""
                     tamanho = str(row.get("tamanho", "")).strip() if str(row.get("tamanho", "")) != "nan" else ""
                     conn.execute(text("""
-                        INSERT INTO produtos (nome, quantidade, preco, cor, tamanho)
-                        VALUES (:nome, :quantidade, :preco, :cor, :tamanho)
-                    """), {"nome": nome, "quantidade": quantidade, "preco": preco, "cor": cor, "tamanho": tamanho})
+                        INSERT INTO produtos (nome, quantidade, preco, cor, tamanho, empresa_id, fornecedor_id)
+                        VALUES (:nome, :quantidade, :preco, :cor, :tamanho, :empresa_id, :fornecedor_id)
+                    """), {"nome": nome, "quantidade": quantidade, "preco": preco, "cor": cor, "tamanho": tamanho,
+                           "empresa_id": empresa_id, "fornecedor_id": fornecedor_id})
                     inseridos += 1
                 except Exception as e:
                     erros.append(f"Linha {i+2}: {str(e)[:80]}")
