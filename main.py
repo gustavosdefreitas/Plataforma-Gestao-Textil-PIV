@@ -1167,7 +1167,7 @@ async def importar_produtos_post(request: Request, arquivo: UploadFile = File(..
     ignorados = 0
 
     try:
-        if arquivo.filename.endswith(".csv"):
+        if arquivo.filename.lower().endswith(".csv"):
             df = pd.read_csv(BytesIO(conteudo), dtype=str)
         else:
             df = pd.read_excel(BytesIO(conteudo), dtype=str)
@@ -1555,7 +1555,7 @@ async def importar_fornecedores_post(request: Request, arquivo: UploadFile = Fil
     ignorados = 0
 
     try:
-        if arquivo.filename.endswith(".csv"):
+        if arquivo.filename.lower().endswith(".csv"):
             df = pd.read_csv(BytesIO(conteudo), dtype=str)
         else:
             df = pd.read_excel(BytesIO(conteudo), dtype=str)
