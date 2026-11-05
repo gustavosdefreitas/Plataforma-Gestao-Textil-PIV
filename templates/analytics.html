@@ -196,12 +196,62 @@
     </div>
   </div>
 
+  <!-- v1.4.0: Previsão por produto com linha de base -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center">
+      <span><i class="fas fa-boxes me-2"></i>Previsão por produto — Regressão linear × Média móvel (3 meses)</span>
+      {% if ml_produto and ml_produto.resumo %}
+      <small class="text-muted">
+        Validação nos 3 últimos meses ({{ ml_produto.resumo.produtos_avaliados }} produtos):
+        MAE RL = <strong>{{ ml_produto.resumo.mae_rl }}</strong> · MAE MM = <strong>{{ ml_produto.resumo.mae_mm }}</strong> ·
+        RMSE RL = {{ ml_produto.resumo.rmse_rl }} · RMSE MM = {{ ml_produto.resumo.rmse_mm }} ·
+        {% if ml_produto.resumo.aceito %}<span class="badge bg-success">Regressão supera a linha de base</span>
+        {% else %}<span class="badge bg-warning text-dark">Regressão não supera a linha de base</span>{% endif %}
+      </small>
+      {% endif %}
+    </div>
+    <div class="card-body p-0">
+      {% if ml_produto and ml_produto.itens %}
+      <div class="table-responsive" style="max-height: 420px;">
+        <table class="table table-sm table-hover mb-0 align-middle">
+          <thead class="table-light sticky-top">
+            <tr>
+              <th>Produto</th><th>Origem</th><th>Método usado</th>
+              <th class="text-end">MAE RL</th><th class="text-end">MAE MM</th>
+              {% for l in ml_produto.labels_futuros %}<th class="text-end">{{ l }}</th>{% endfor %}
+              <th class="text-end">Estoque</th><th class="text-end">Sugestão de compra</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for it in ml_produto.itens %}
+            <tr>
+              <td>{{ it.produto }}</td>
+              <td><small class="text-muted">{{ it.origem }}</small></td>
+              <td><small>{{ it.vencedor }}</small></td>
+              <td class="text-end">{{ it.mae_rl if it.avaliavel else '—' }}</td>
+              <td class="text-end">{{ it.mae_mm if it.avaliavel else '—' }}</td>
+              {% for v in it.previsao %}<td class="text-end">{{ v }}</td>{% endfor %}
+              <td class="text-end">{{ it.estoque }}</td>
+              <td class="text-end fw-bold {% if it.sugestao_compra > 0 %}text-danger{% endif %}">{{ it.sugestao_compra }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted p-3 mb-0">Histórico insuficiente para previsão por produto.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Nota metodológica -->
   <div class="alert alert-light border mt-2 small">
     <i class="fas fa-flask me-1 text-primary"></i>
-    <strong>Metodologia ML:</strong> Regressão Linear Simples (scikit-learn) treinada com histórico mensal de vendas (últimos 12 meses).
-    Variável independente: índice temporal do mês. Variável dependente: unidades vendidas.
-    Previsão gerada para os próximos 3 meses. Dados capturados via IoT (ESP32 + GM805) e sistema web.
+    <strong>Metodologia ML:</strong> Regressão Linear Simples (scikit-learn) treinada com histórico mensal de vendas (últimos 12 meses, meses sem venda = 0).
+    Variável independente: índice temporal do mês. Variável dependente: unidades vendidas por produto (cor e tamanho distintos).
+    Linha de base: média móvel dos 3 meses anteriores. Os 3 meses finais são reservados para validação (MAE e RMSE);
+    a previsão dos próximos 3 meses usa o método de menor MAE. Produtos com menos de 4 meses com venda são agregados pelo produto-base;
+    sem histórico, recebem a média geral com aviso. Dados capturados via IoT (ESP32 + GM805) e sistema web.
   </div>
 
 </div>

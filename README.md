@@ -3,7 +3,7 @@
 > Projeto Integrador IV — UNIVESP (PJI410)  
 > Análise de dados em escala · Machine Learning · IoT · NF-e · Etiquetas · Visualização · Nuvem
 
-**Versão atual: v1.3.1**
+**Versão atual: v1.4.0**
 
 Sistema web full-stack para controle de estoque e vendas com camada de inteligência artificial, leitura de Nota Fiscal Eletrônica via QR Code e integração IoT com ESP32 + leitor de código de barras.
 
@@ -16,6 +16,8 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 - **Venda por scanner USB** — campo de scan na tela de vendas compatível com leitores USB HID (ex: Obitech MHT-U4)
 - **Integração IoT (ESP32 + GM805)** — firmware MicroPython para ESP32 com leitor de barcode UART; registra venda e decrementa estoque em tempo real via Wi-Fi
 - **Previsão de demanda (ML)** — regressão linear com scikit-learn, previsão para os próximos 3 meses com indicador R²
+- **Previsão por produto com linha de base (v1.4.0)** — regressão linear comparada à média móvel de 3 meses, com os 3 meses finais reservados para validação (MAE e RMSE); usa o método de menor erro e calcula sugestão de compra (previsão − estoque)
+- **Leitura IoT sem duplicidade (v1.4.0)** — cada leitura do ESP32 leva um `leitura_id` único; o servidor ignora reenvios e o firmware guarda as leituras em fila quando a rede cai, reenviando na reconexão
 - **Dashboard Analytics ML** — 7 gráficos interativos: previsão de demanda, faturamento mensal, vendas diárias, top 10 produtos, padrão por dia da semana, giro de estoque e ticket médio
 - **Importação em massa** — upload de planilha Excel/CSV para cadastrar produtos e fornecedores em lote, com detecção automática de duplicatas por nome e CNPJ; modelos CSV disponíveis para download
 - **Perfil do usuário** — página `/meu-perfil` para edição de nome, CPF e senha; acessível pelo clique no nome no navbar
@@ -46,6 +48,7 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 | v1.2.3 | Set/2026 | CPF opcional no cadastro e edição de usuários |
 | v1.3.0 | Set/2026 | Importação de produtos vincula fornecedor (por CNPJ ou nome) e empresa; novas colunas `fornecedor`, `fornecedor_cnpj` e `empresa` |
 | v1.3.1 | Set/2026 | Correção: dependência `openpyxl` adicionada para importar arquivos Excel (.xlsx) |
+| v1.4.0 | Nov/2026 | Previsão por produto com média móvel como linha de base e MAE/RMSE fora da amostra; `leitura_id` e fila offline no ESP32; tabela `leituras_iot`; rota `/api/previsao/produtos`; script de teste `scripts/teste_historico_v140.py` |
 
 ---
 
@@ -149,6 +152,8 @@ Reinicie o uvicorn após atualizar.
 
 ### Ligações (GM805 → ESP32)
 
+> Use o conector de **6 vias (UART TTL)** do GM805. O conector lateral de 9 vias é USB e não envia dados pela serial do ESP32.
+
 | GM805 | ESP32 |
 |---|---|
 | TX | GPIO 16 (RX2) |
@@ -207,7 +212,8 @@ SERVER_URL   = "http://192.168.X.X:8000"  # IP do PC na rede local
 | `GET` | `/produtos/{id}/etiqueta/pdf` | Download da etiqueta em PDF (A6) |
 | `GET` | `/api/produto/scan/{codigo}` | Busca produto pelo código (scanner USB) |
 | `POST` | `/api/venda/scanner` | Registra venda via ESP32 (IoT) |
-| `GET` | `/analytics` | Dashboard Analytics ML (7 gráficos) |
+| `GET` | `/analytics` | Dashboard Analytics ML (7 gráficos + previsão por produto) |
+| `GET` | `/api/previsao/produtos` | Previsão por produto em JSON (MAE/RMSE, método escolhido, sugestão de compra) |
 | `GET` | `/meu-perfil` | Página de perfil do usuário logado |
 | `POST` | `/meu-perfil` | Salva alterações de perfil e senha |
 | `GET` | `/produtos/importar` | Tela de importação de produtos via CSV/Excel |

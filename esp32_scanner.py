@@ -27,6 +27,8 @@
 import machine
 import network
 import urequests
+import ubinascii
+import os
 import ujson
 import time
 import sys
@@ -108,10 +110,45 @@ def conectar_wifi():
 #  Envio da venda ao servidor
 # ─────────────────────────────────────────────────────────────
 
-def enviar_venda(codigo: str) -> bool:
+# ─────────────────────────────────────────────────────────────
+#  Identificador único por leitura e fila offline (v1.4.0)
+# ─────────────────────────────────────────────────────────────
+
+ARQUIVO_FILA = "fila_leituras.json"
+_MAC = ubinascii.hexlify(network.WLAN(network.STA_IF).config("mac")).decode()
+_contador = 0
+
+
+def gerar_leitura_id() -> str:
+    """MAC do dispositivo + instante + contador: único mesmo após reinício."""
+    global _contador
+    _contador += 1
+    return "%s-%d-%d" % (_MAC, time.time(), _contador)
+
+
+def carregar_fila() -> list:
+    try:
+        with open(ARQUIVO_FILA) as f:
+            return ujson.loads(f.read())
+    except (OSError, ValueError):
+        return []
+
+
+def salvar_fila(fila: list):
+    if fila:
+        with open(ARQUIVO_FILA, "w") as f:
+            f.write(ujson.dumps(fila))
+    else:
+        try:
+            os.remove(ARQUIVO_FILA)
+        except OSError:
+            pass
+
+
+def enviar_venda(codigo: str, leitura_id: str) -> str:
     """
-    Envia POST /api/venda/scanner com o código lido.
-    Retorna True se a venda foi registrada com sucesso.
+    Envia POST /api/venda/scanner com o código lido e o identificador da leitura.
+    Retorna "ok", "erro" (resposta do servidor; não reenviar) ou "rede" (reter e reenviar).
     """
     url = f"{SERVER_URL}/api/venda/scanner"
     payload = ujson.dumps({
@@ -119,28 +156,57 @@ def enviar_venda(codigo: str) -> bool:
         "session_key":  SESSION_KEY,
         "quantidade":   QUANTIDADE_PADRAO,
         "cliente_nome": CLIENTE_NOME,
+        "leitura_id":   leitura_id,
     })
     headers = {"Content-Type": "application/json"}
 
     try:
         resp = urequests.post(url, data=payload, headers=headers, timeout=10)
         data = resp.json()
+        status = resp.status_code
         resp.close()
 
-        if resp.status_code == 200 and data.get("ok"):
-            print(f"[VENDA OK] #{data['numero_venda']} | {data['produto']} | R$ {data['total']:.2f}")
+        if status == 200 and data.get("ok"):
+            if data.get("duplicada"):
+                print(f"[DUPLICADA] Leitura {leitura_id} já registrada — sem nova baixa")
+            else:
+                print(f"[VENDA OK] #{data['numero_venda']} | {data['produto']} | R$ {data['total']:.2f}")
             piscar_led(2)
-            return True
-        else:
-            erro = data.get("erro", "Erro desconhecido")
-            print(f"[VENDA ERRO {resp.status_code}] {erro}")
-            piscar_led(5, intervalo_ms=80)  # pisca rápido = erro
-            return False
+            return "ok"
+        erro = data.get("erro", "Erro desconhecido")
+        print(f"[VENDA ERRO {status}] {erro}")
+        piscar_led(5, intervalo_ms=80)  # pisca rápido = erro
+        return "erro"
 
-    except OSError as e:
-        print(f"[REDE ERRO] {e}")
+    except (OSError, ValueError) as e:
+        print(f"[REDE ERRO] {e} — leitura retida para reenvio")
         piscar_led(5, intervalo_ms=80)
-        return False
+        return "rede"
+
+
+def processar_leitura(codigo: str):
+    leitura = {"codigo": codigo, "leitura_id": gerar_leitura_id()}
+    if enviar_venda(leitura["codigo"], leitura["leitura_id"]) == "rede":
+        fila = carregar_fila()
+        fila.append(leitura)
+        salvar_fila(fila)
+
+
+def reenviar_fila():
+    """Reenvia leituras retidas; o servidor ignora identificadores já processados."""
+    fila = carregar_fila()
+    if not fila:
+        return
+    if not network.WLAN(network.STA_IF).isconnected():
+        return
+    restantes = []
+    for i, leitura in enumerate(fila):
+        if enviar_venda(leitura["codigo"], leitura["leitura_id"]) == "rede":
+            restantes = fila[i:]
+            break
+    salvar_fila(restantes)
+    if not restantes:
+        print("[FILA] Todas as leituras retidas foram reenviadas")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -161,8 +227,16 @@ def main():
     led.value(0)
 
     buffer = b""
+    ultimo_reenvio = time.ticks_ms()
 
     while True:
+        # A cada 15 s tenta reenviar leituras retidas por falta de rede
+        if time.ticks_diff(time.ticks_ms(), ultimo_reenvio) > 15000:
+            ultimo_reenvio = time.ticks_ms()
+            if not network.WLAN(network.STA_IF).isconnected():
+                conectar_wifi()
+            reenviar_fila()
+
         # Lê bytes disponíveis da UART
         if uart.any():
             chunk = uart.read()
@@ -180,7 +254,7 @@ def main():
                 codigo = linha.decode("utf-8", "ignore").strip()
                 if codigo:
                     print(f"[LIDO] Código: {codigo}")
-                    enviar_venda(codigo)
+                    processar_leitura(codigo)
 
         time.sleep_ms(50)
 

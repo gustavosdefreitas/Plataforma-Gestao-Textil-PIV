@@ -204,6 +204,19 @@ async def lifespan(app: FastAPI):
         """))
 
         conn.execute(text("CREATE SEQUENCE IF NOT EXISTS seq_numero_venda START 1"))
+        # PI IV v1.4.0: registro de leituras do dispositivo IoT (evita duplicidade)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS leituras_iot (
+                id SERIAL PRIMARY KEY,
+                leitura_id VARCHAR(64) UNIQUE NOT NULL,
+                codigo VARCHAR(64) NOT NULL,
+                usuario_id INTEGER,
+                numero_venda INTEGER,
+                grupo_venda VARCHAR(36),
+                resposta TEXT,
+                data_leitura TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """))
 
         conn.execute(text("""
             ALTER TABLE vendas
@@ -310,6 +323,183 @@ def prever_demanda(conn, empresa_id: int | None = None) -> dict:
             "previsao": [],
             "r2": None,
         }
+
+
+# --- PI IV v1.4.0: previsão por produto com linha de base e validação fora da amostra ---
+HORIZONTE_PREVISAO = 3      # meses previstos
+JANELA_MEDIA_MOVEL = 3      # meses usados pela linha de base
+MESES_HISTORICO = 12        # meses considerados no treinamento
+MIN_MESES_COM_VENDA = 4     # abaixo disso o produto é tratado como "histórico insuficiente"
+
+
+def _mae(reais, previstos) -> float:
+    r = np.asarray(reais, dtype=float); p = np.asarray(previstos, dtype=float)
+    return float(np.mean(np.abs(r - p))) if len(r) else 0.0
+
+
+def _rmse(reais, previstos) -> float:
+    r = np.asarray(reais, dtype=float); p = np.asarray(previstos, dtype=float)
+    return float(np.sqrt(np.mean((r - p) ** 2))) if len(r) else 0.0
+
+
+def _prever_regressao(serie, passos):
+    """Ajusta regressão linear (índice do mês -> quantidade) e projeta `passos` meses."""
+    n = len(serie)
+    X = np.arange(n).reshape(-1, 1)
+    modelo = LinearRegression().fit(X, np.asarray(serie, dtype=float))
+    futuro = modelo.predict(np.arange(n, n + passos).reshape(-1, 1))
+    return [max(0.0, float(v)) for v in futuro], modelo
+
+
+def _prever_media_movel(serie, passos, janela=JANELA_MEDIA_MOVEL):
+    """Linha de base: média dos últimos `janela` meses, repetida em todo o horizonte."""
+    base = float(np.mean(serie[-janela:])) if len(serie) else 0.0
+    return [base] * passos
+
+
+def avaliar_serie(serie, horizonte=HORIZONTE_PREVISAO, janela=JANELA_MEDIA_MOVEL) -> dict:
+    """
+    Avalia uma série mensal (meses sem venda = 0) reservando os `horizonte` meses
+    finais como teste. Compara regressão linear e média móvel por MAE/RMSE e,
+    em seguida, gera a previsão futura com o método de menor MAE treinado na série completa.
+    """
+    serie = [float(v) for v in serie]
+    if len(serie) < horizonte + janela:
+        return {"avaliavel": False}
+    treino, teste = serie[:-horizonte], serie[-horizonte:]
+    prev_rl, modelo = _prever_regressao(treino, horizonte)
+    prev_mm = _prever_media_movel(treino, horizonte, janela)
+    mae_rl, mae_mm = _mae(teste, prev_rl), _mae(teste, prev_mm)
+    rmse_rl, rmse_mm = _rmse(teste, prev_rl), _rmse(teste, prev_mm)
+    r2_treino = float(modelo.score(np.arange(len(treino)).reshape(-1, 1), treino)) if np.var(treino) > 0 else 0.0
+    vencedor = "Regressão linear" if mae_rl < mae_mm else "Média móvel"
+    if vencedor == "Regressão linear":
+        futuro, _ = _prever_regressao(serie, horizonte)
+    else:
+        futuro = _prever_media_movel(serie, horizonte, janela)
+    return {
+        "avaliavel": True,
+        "teste_real": teste,
+        "teste_rl": [round(v, 2) for v in prev_rl],
+        "teste_mm": [round(v, 2) for v in prev_mm],
+        "mae_rl": round(mae_rl, 2), "mae_mm": round(mae_mm, 2),
+        "rmse_rl": round(rmse_rl, 2), "rmse_mm": round(rmse_mm, 2),
+        "r2_treino": round(r2_treino, 3),
+        "vencedor": vencedor,
+        "previsao": [round(v, 1) for v in futuro],
+    }
+
+
+def montar_series_mensais(linhas, meses):
+    """Converte linhas (chave, mes, qtd) em séries alinhadas aos `meses`, com zero nos meses sem venda."""
+    idx = {m: i for i, m in enumerate(meses)}
+    series = {}
+    for chave, mes, qtd in linhas:
+        if mes not in idx:
+            continue
+        series.setdefault(chave, [0.0] * len(meses))[idx[mes]] += float(qtd or 0)
+    return series
+
+
+def prever_demanda_por_produto(conn, empresa_id: int | None = None) -> dict:
+    """
+    Previsão por produto (cor e tamanho como itens distintos). Produtos com histórico
+    insuficiente são agregados pelo produto-base (nome); produtos sem nenhum histórico
+    recebem a média dos produtos avaliáveis, com aviso. Produtos sem venda há 90 dias
+    e com saldo zero são considerados descontinuados e excluídos.
+    """
+    vazio = {"itens": [], "resumo": None, "labels_futuros": []}
+    try:
+        hoje = date.today().replace(day=1)
+        meses = [(hoje - relativedelta(months=MESES_HISTORICO - i)) for i in range(MESES_HISTORICO)]
+        meses_str = [m.strftime("%Y-%m") for m in meses]
+        filtro = "AND p.empresa_id = :empresa_id" if empresa_id else ""
+        params = {"inicio": meses[0], "fim": hoje}
+        if empresa_id:
+            params["empresa_id"] = empresa_id
+        produtos = conn.execute(text(f"""
+            SELECT p.id, p.nome, p.cor, p.tamanho, p.quantidade,
+                   MAX(v.data_venda) AS ultima_venda
+            FROM produtos p LEFT JOIN vendas v ON v.produto_id = p.id
+            WHERE 1=1 {filtro}
+            GROUP BY p.id, p.nome, p.cor, p.tamanho, p.quantidade
+        """), params).fetchall()
+        linhas = conn.execute(text(f"""
+            SELECT v.produto_id, v.data_venda, v.quantidade
+            FROM vendas v JOIN produtos p ON p.id = v.produto_id
+            WHERE v.data_venda >= :inicio AND v.data_venda < :fim {filtro}
+        """), params).fetchall()
+    except Exception:
+        return vazio
+
+    def _mes(d):
+        d = d if isinstance(d, (datetime, date)) else datetime.fromisoformat(str(d))
+        return d.strftime("%Y-%m")
+
+    series = montar_series_mensais([(l.produto_id, _mes(l.data_venda), l.quantidade) for l in linhas], meses_str)
+    limite_desc = datetime.now() - relativedelta(days=90)
+    itens, base_nome = [], {}
+    for p in produtos:
+        ult = p.ultima_venda
+        if ult is not None and not isinstance(ult, datetime):
+            ult = datetime.fromisoformat(str(ult))
+        if float(p.quantidade or 0) <= 0 and (ult is None or ult < limite_desc):
+            continue  # descontinuado
+        serie = series.get(p.id, [0.0] * MESES_HISTORICO)
+        rotulo = " ".join(x for x in [p.nome, p.cor or "", p.tamanho or ""] if x).strip()
+        meses_com_venda = sum(1 for v in serie if v > 0)
+        base = base_nome.setdefault(p.nome, [0.0] * MESES_HISTORICO)
+        for i, v in enumerate(serie):
+            base[i] += v
+        itens.append({"id": p.id, "produto": rotulo, "nome_base": p.nome, "serie": serie,
+                      "meses_com_venda": meses_com_venda, "estoque": float(p.quantidade or 0)})
+
+    avaliados = []
+    for it in itens:
+        if it["meses_com_venda"] >= MIN_MESES_COM_VENDA:
+            res = avaliar_serie(it["serie"]); it["origem"] = "Produto"
+        elif sum(1 for v in base_nome[it["nome_base"]] if v > 0) >= MIN_MESES_COM_VENDA:
+            res = avaliar_serie(base_nome[it["nome_base"]]); it["origem"] = "Produto-base (agregado)"
+        else:
+            res = {"avaliavel": False}; it["origem"] = "Sem histórico"
+        it.update(res)
+        if res.get("avaliavel") and it["origem"] == "Produto":
+            avaliados.append(it)
+
+    media_geral = [round(float(np.mean([a["previsao"][h] for a in avaliados])), 1)
+                   for h in range(HORIZONTE_PREVISAO)] if avaliados else [0.0] * HORIZONTE_PREVISAO
+    for it in itens:
+        if not it.get("avaliavel"):
+            it["previsao"] = media_geral
+            it["vencedor"] = "Média geral (aviso: produto sem histórico suficiente)"
+        it["total_previsto"] = round(sum(it["previsao"]), 1)
+        it["sugestao_compra"] = max(0.0, round(it["total_previsto"] - it["estoque"], 1))
+        it.pop("serie", None)
+
+    resumo = None
+    if avaliados:
+        mae_rl = float(np.mean([a["mae_rl"] for a in avaliados]))
+        mae_mm = float(np.mean([a["mae_mm"] for a in avaliados]))
+        resumo = {
+            "produtos_avaliados": len(avaliados),
+            "mae_rl": round(mae_rl, 2), "mae_mm": round(mae_mm, 2),
+            "rmse_rl": round(float(np.mean([a["rmse_rl"] for a in avaliados])), 2),
+            "rmse_mm": round(float(np.mean([a["rmse_mm"] for a in avaliados])), 2),
+            "rl_vence": sum(1 for a in avaliados if a["vencedor"] == "Regressão linear"),
+            "aceito": mae_rl < mae_mm,
+        }
+    itens.sort(key=lambda x: x["total_previsto"], reverse=True)
+    labels = [(hoje + relativedelta(months=i)).strftime("%m/%Y") for i in range(HORIZONTE_PREVISAO)]
+    return {"itens": itens, "resumo": resumo, "labels_futuros": labels}
+
+
+@app.get("/api/previsao/produtos")
+async def api_previsao_produtos(request: Request):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"erro": "Não autenticado"})
+    with engine.connect() as conn:
+        return JSONResponse(prever_demanda_por_produto(conn))
 
 
 # --- PI IV: IoT — sensor de estoque ---
@@ -749,6 +939,7 @@ async def analytics(request: Request):
 
         # 1. Previsão de demanda (ML já existente)
         ml_previsao = prever_demanda(conn)
+        ml_produto = prever_demanda_por_produto(conn)
 
         # 2. Vendas diárias dos últimos 30 dias
         try:
@@ -886,6 +1077,7 @@ async def analytics(request: Request):
     return templates.TemplateResponse(request, "analytics.html", {
         "user": user,
         "ml_previsao": ml_previsao,
+        "ml_produto": ml_produto,
         "vd_labels": vd_labels,
         "vd_vendas": vd_vendas,
         "vd_fatura": vd_fatura,
@@ -3557,6 +3749,7 @@ class VendaScannerPayload(BaseModel):
     session_key: str
     quantidade: float = 1.0
     cliente_nome: str = "Balcão"
+    leitura_id: str | None = None  # identificador único gerado no dispositivo (v1.4.0)
 
 
 @app.post("/api/venda/scanner")
@@ -3575,6 +3768,18 @@ async def api_venda_scanner(payload: VendaScannerPayload):
 
     if not usuario:
         return JSONResponse(status_code=401, content={"erro": "session_key inválida"})
+
+    # Leitura já processada (reenvio após falha de rede): devolve o mesmo resultado sem nova baixa
+    if payload.leitura_id:
+        with engine.connect() as conn:
+            anterior = conn.execute(
+                text("SELECT resposta FROM leituras_iot WHERE leitura_id = :lid"),
+                {"lid": payload.leitura_id}
+            ).fetchone()
+        if anterior:
+            dados = json.loads(anterior.resposta or "{}")
+            dados["duplicada"] = True
+            return JSONResponse(dados)
 
     codigo_limpo = payload.codigo.lstrip("0") or "0"
     try:
@@ -3629,17 +3834,33 @@ async def api_venda_scanner(payload: VendaScannerPayload):
             text("UPDATE produtos SET quantidade = quantidade - :qtd WHERE id = :id"),
             {"qtd": payload.quantidade, "id": prod.id}
         )
-        conn.commit()
+        resposta = {
+            "ok": True,
+            "numero_venda": num_venda,
+            "produto": prod.nome,
+            "preco_unitario": float(prod.preco),
+            "quantidade": payload.quantidade,
+            "total": round(float(prod.preco) * payload.quantidade, 2),
+            "comprovante_url": f"/vendas/comprovante/grupo/{grupo}",
+            "duplicada": False,
+        }
+        try:
+            if payload.leitura_id:
+                # mesma transação da venda: se o identificador já existir, nada é gravado
+                conn.execute(
+                    text("""
+                        INSERT INTO leituras_iot (leitura_id, codigo, usuario_id, numero_venda, grupo_venda, resposta)
+                        VALUES (:lid, :cod, :uid, :num, :grupo, :resp)
+                    """),
+                    {"lid": payload.leitura_id, "cod": payload.codigo, "uid": usuario.id,
+                     "num": num_venda, "grupo": grupo, "resp": json.dumps(resposta)}
+                )
+            conn.commit()
+        except IntegrityError:
+            conn.rollback()
+            return JSONResponse({"ok": True, "duplicada": True, "produto": prod.nome})
 
-    return JSONResponse({
-        "ok": True,
-        "numero_venda": num_venda,
-        "produto": prod.nome,
-        "preco_unitario": float(prod.preco),
-        "quantidade": payload.quantidade,
-        "total": round(float(prod.preco) * payload.quantidade, 2),
-        "comprovante_url": f"/vendas/comprovante/grupo/{grupo}",
-    })
+    return JSONResponse(resposta)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
