@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Etiquetas de controle do leitor{% endblock %}
+{% block content %}
+<div class="container py-4" id="conteudo-principal">
+  <div class="d-flex align-items-center mb-3 d-print-none">
+    <h2 class="mb-0 me-3"><i class="fas fa-barcode me-2" aria-hidden="true"></i>Etiquetas de controle do leitor</h2>
+    <button class="btn btn-primary btn-sm" onclick="window.print()"><i class="fas fa-print me-1" aria-hidden="true"></i>Imprimir</button>
+  </div>
+  <p class="text-muted d-print-none">Cole estas etiquetas ao lado do leitor no balcão. Ler uma delas troca o tipo de operação do dispositivo, sem enviar nada ao servidor. O modo escolhido permanece até que outra etiqueta de controle seja lida e é confirmado pelo LED do ESP32.</p>
+  <div class="row g-4">
+    {% for codigo, info in etiquetas.items() %}
+    <div class="col-md-4">
+      <div class="card h-100 text-center shadow-sm" style="border:2px solid #333;">
+        <div class="card-body">
+          <h4 class="fw-bold">{{ info[0] }}</h4>
+          <img src="/scanner/controle/{{ codigo }}.png" alt="Código de barras {{ codigo }}" style="max-width:100%;height:90px;">
+          <p class="small mt-2 mb-1">{{ info[1] }}</p>
+          <p class="small text-muted mb-0">Confirmação: {{ info[2] }}</p>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

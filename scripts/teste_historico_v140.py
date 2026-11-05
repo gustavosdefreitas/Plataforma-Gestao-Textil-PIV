@@ -22,7 +22,7 @@ with eng.begin() as c:
     c.execute(text("CREATE TABLE empresas(id INTEGER PRIMARY KEY, nome_fantasia TEXT)"))
     c.execute(text("CREATE TABLE produtos(id INTEGER PRIMARY KEY, nome TEXT, quantidade NUMERIC, preco NUMERIC, empresa_id INT, fornecedor_id INT, cor TEXT, tamanho TEXT)"))
     c.execute(text("CREATE TABLE vendas(id INTEGER PRIMARY KEY, produto_id INT, empresa_id INT, quantidade NUMERIC, preco_unitario NUMERIC, total NUMERIC, cliente_nome TEXT, tipo_documento TEXT, grupo_venda TEXT, numero_venda INT, data_venda TIMESTAMP)"))
-    c.execute(text("CREATE TABLE leituras_iot(id INTEGER PRIMARY KEY, leitura_id TEXT UNIQUE NOT NULL, codigo TEXT, usuario_id INT, numero_venda INT, grupo_venda TEXT, resposta TEXT, data_leitura TIMESTAMP)"))
+    c.execute(text("CREATE TABLE leituras_iot(id INTEGER PRIMARY KEY, leitura_id TEXT UNIQUE NOT NULL, codigo TEXT, usuario_id INT, numero_venda INT, grupo_venda TEXT, resposta TEXT, data_leitura TIMESTAMP DEFAULT CURRENT_TIMESTAMP, tipo TEXT DEFAULT 'venda', reenvios INT DEFAULT 0, retida BOOLEAN DEFAULT 0)"))
     c.execute(text("INSERT INTO usuarios VALUES(1,'caixa','Caixa','user','SK-TESTE')"))
     c.execute(text("INSERT INTO empresas VALUES(1,'Loja Teste')"))
 

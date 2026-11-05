@@ -3,7 +3,7 @@
 > Projeto Integrador IV — UNIVESP (PJI410)  
 > Análise de dados em escala · Machine Learning · IoT · NF-e · Etiquetas · Visualização · Nuvem
 
-**Versão atual: v1.4.0**
+**Versão atual: v1.5.0**
 
 Sistema web full-stack para controle de estoque e vendas com camada de inteligência artificial, leitura de Nota Fiscal Eletrônica via QR Code e integração IoT com ESP32 + leitor de código de barras.
 
@@ -17,6 +17,9 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 - **Integração IoT (ESP32 + GM805)** — firmware MicroPython para ESP32 com leitor de barcode UART; registra venda e decrementa estoque em tempo real via Wi-Fi
 - **Previsão de demanda (ML)** — regressão linear com scikit-learn, previsão para os próximos 3 meses com indicador R²
 - **Previsão por produto com linha de base (v1.4.0)** — regressão linear comparada à média móvel de 3 meses, com os 3 meses finais reservados para validação (MAE e RMSE); usa o método de menor erro e calcula sugestão de compra (previsão − estoque)
+- **Tipo de operação no leitor (v1.5.0)** — etiquetas de controle `OP-VENDA`, `OP-ENTRADA` e `OP-CONSULTA` (página `/scanner/etiquetas-controle`) trocam o modo do ESP32 sem botões; confirmação por piscadas longas do LED
+- **Segregação por empresa no dispositivo (v1.5.0)** — `EMPRESA_ID` no firmware; o servidor recusa (403) produtos de outra empresa
+- **Módulo de validação (v1.5.0)** — página `/validacao` que reúne as leituras do balcão, a conferência de cada leitura, o tempo de digitação, a contagem física, a queda proposital da rede e o questionário SUS da gestora, calculando os seis critérios de aceitação e exportando CSV
 - **Leitura IoT sem duplicidade (v1.4.0)** — cada leitura do ESP32 leva um `leitura_id` único; o servidor ignora reenvios e o firmware guarda as leituras em fila quando a rede cai, reenviando na reconexão
 - **Dashboard Analytics ML** — 7 gráficos interativos: previsão de demanda, faturamento mensal, vendas diárias, top 10 produtos, padrão por dia da semana, giro de estoque e ticket médio
 - **Importação em massa** — upload de planilha Excel/CSV para cadastrar produtos e fornecedores em lote, com detecção automática de duplicatas por nome e CNPJ; modelos CSV disponíveis para download
@@ -48,6 +51,7 @@ Sistema web full-stack para controle de estoque e vendas com camada de inteligê
 | v1.2.3 | Set/2026 | CPF opcional no cadastro e edição de usuários |
 | v1.3.0 | Set/2026 | Importação de produtos vincula fornecedor (por CNPJ ou nome) e empresa; novas colunas `fornecedor`, `fornecedor_cnpj` e `empresa` |
 | v1.3.1 | Set/2026 | Correção: dependência `openpyxl` adicionada para importar arquivos Excel (.xlsx) |
+| v1.5.0 | Nov/2026 | Tipo de operação por etiqueta de controle (venda, entrada, consulta); segregação por empresa no endpoint do ESP32; marcação de leituras retidas e contagem de reenvios; módulo de validação `/validacao` com SUS e exportação CSV; script `scripts/teste_v150.py` |
 | v1.4.0 | Nov/2026 | Previsão por produto com média móvel como linha de base e MAE/RMSE fora da amostra; `leitura_id` e fila offline no ESP32; tabela `leituras_iot`; rota `/api/previsao/produtos`; script de teste `scripts/teste_historico_v140.py` |
 
 ---

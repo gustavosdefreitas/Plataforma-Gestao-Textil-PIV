@@ -53,6 +53,16 @@ QUANTIDADE_PADRAO = 1.0
 # Nome do cliente padrão (venda de balcão)
 CLIENTE_NOME = "Balcão"
 
+# v1.5.0: empresa em que o dispositivo está instalado (id da tabela empresas).
+# O servidor recusa produtos de outra empresa. Use None para não restringir.
+EMPRESA_ID = None
+
+# v1.5.0: tipo de operação. Muda ao ler as etiquetas de controle impressas em
+# /scanner/etiquetas-controle (OP-VENDA, OP-ENTRADA, OP-CONSULTA).
+MODOS = {"OP-VENDA": "venda", "OP-ENTRADA": "entrada", "OP-CONSULTA": "consulta"}
+PISCADAS_MODO = {"venda": 1, "entrada": 2, "consulta": 3}
+modo_atual = "venda"
+
 # UART do leitor de barcode
 UART_ID   = 2     # UART2 do ESP32 → pinos GPIO16 (RX) e GPIO17 (TX)
 UART_BAUD = 9600  # Maioria dos módulos de barcode usa 9600
@@ -145,9 +155,9 @@ def salvar_fila(fila: list):
             pass
 
 
-def enviar_venda(codigo: str, leitura_id: str) -> str:
+def enviar_venda(codigo: str, leitura_id: str, tipo: str = "venda", retida: bool = False) -> str:
     """
-    Envia POST /api/venda/scanner com o código lido e o identificador da leitura.
+    Envia POST /api/venda/scanner com o código lido, o identificador da leitura e o tipo de operação.
     Retorna "ok", "erro" (resposta do servidor; não reenviar) ou "rede" (reter e reenviar).
     """
     url = f"{SERVER_URL}/api/venda/scanner"
@@ -157,6 +167,9 @@ def enviar_venda(codigo: str, leitura_id: str) -> str:
         "quantidade":   QUANTIDADE_PADRAO,
         "cliente_nome": CLIENTE_NOME,
         "leitura_id":   leitura_id,
+        "tipo":         tipo,
+        "empresa_id":   EMPRESA_ID,
+        "retida":       retida,
     })
     headers = {"Content-Type": "application/json"}
 
@@ -169,6 +182,10 @@ def enviar_venda(codigo: str, leitura_id: str) -> str:
         if status == 200 and data.get("ok"):
             if data.get("duplicada"):
                 print(f"[DUPLICADA] Leitura {leitura_id} já registrada — sem nova baixa")
+            elif data.get("tipo") == "consulta":
+                print(f"[CONSULTA] {data['produto']} | R$ {data['preco_unitario']:.2f} | estoque {data['estoque']}")
+            elif data.get("tipo") == "entrada":
+                print(f"[ENTRADA OK] {data['produto']} | estoque {data['estoque']}")
             else:
                 print(f"[VENDA OK] #{data['numero_venda']} | {data['produto']} | R$ {data['total']:.2f}")
             piscar_led(2)
@@ -184,9 +201,22 @@ def enviar_venda(codigo: str, leitura_id: str) -> str:
         return "rede"
 
 
+def trocar_modo(codigo: str) -> bool:
+    """Etiqueta de controle: troca o tipo de operação sem enviar nada ao servidor."""
+    global modo_atual
+    if codigo not in MODOS:
+        return False
+    modo_atual = MODOS[codigo]
+    print(f"[MODO] Operação selecionada: {modo_atual.upper()}")
+    piscar_led(PISCADAS_MODO[modo_atual], intervalo_ms=400)  # piscadas longas = confirmação do modo
+    return True
+
+
 def processar_leitura(codigo: str):
-    leitura = {"codigo": codigo, "leitura_id": gerar_leitura_id()}
-    if enviar_venda(leitura["codigo"], leitura["leitura_id"]) == "rede":
+    if trocar_modo(codigo):
+        return
+    leitura = {"codigo": codigo, "leitura_id": gerar_leitura_id(), "tipo": modo_atual}
+    if enviar_venda(leitura["codigo"], leitura["leitura_id"], leitura["tipo"]) == "rede":
         fila = carregar_fila()
         fila.append(leitura)
         salvar_fila(fila)
@@ -201,7 +231,8 @@ def reenviar_fila():
         return
     restantes = []
     for i, leitura in enumerate(fila):
-        if enviar_venda(leitura["codigo"], leitura["leitura_id"]) == "rede":
+        if enviar_venda(leitura["codigo"], leitura["leitura_id"],
+                        leitura.get("tipo", "venda"), retida=True) == "rede":
             restantes = fila[i:]
             break
     salvar_fila(restantes)
@@ -223,7 +254,7 @@ def main():
         time.sleep(10)
         machine.reset()
 
-    print("[Scanner] Pronto. Aguardando leituras de barcode/QR...\n")
+    print("[Scanner] Pronto. Modo inicial: VENDA. Aguardando leituras de barcode/QR...\n")
     led.value(0)
 
     buffer = b""

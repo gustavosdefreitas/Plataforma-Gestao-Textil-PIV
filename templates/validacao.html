@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Validação com a comunidade externa{% endblock %}
+{% block content %}
+<div class="container py-4" id="conteudo-principal">
+{% if not dados %}
+  <h2 class="mb-3"><i class="fas fa-clipboard-check me-2" aria-hidden="true"></i>Validação com a comunidade externa</h2>
+  <p class="text-muted">Cada sessão reúne, no período em que está aberta, as leituras feitas pelo leitor no balcão, os tempos de digitação, a contagem física e o questionário da gestora. Ao final, o sistema calcula os seis critérios de aceitação do projeto.</p>
+  <p><a href="/scanner/etiquetas-controle" class="btn btn-outline-secondary btn-sm"><i class="fas fa-barcode me-1" aria-hidden="true"></i>Etiquetas de controle do leitor</a></p>
+  <form method="post" action="/validacao/nova" class="row g-2 mb-4">
+    <div class="col-md-8"><input class="form-control" name="descricao" required maxlength="150" placeholder="Ex.: Validação na loja parceira – balcão principal"></div>
+    <div class="col-md-4"><button class="btn btn-primary w-100"><i class="fas fa-play me-1" aria-hidden="true"></i>Iniciar sessão</button></div>
+  </form>
+  <table class="table table-sm table-hover">
+    <thead><tr><th>#</th><th>Descrição</th><th>Início</th><th>Fim</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sessoes %}
+      <tr><td>{{ s.id }}</td><td>{{ s.descricao }}</td><td>{{ s.inicio }}</td><td>{{ s.fim or 'em andamento' }}</td>
+          <td><a class="btn btn-outline-primary btn-sm" href="/validacao/{{ s.id }}">Abrir</a></td></tr>
+    {% else %}
+      <tr><td colspan="5" class="text-muted">Nenhuma sessão registrada.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  {% set s = dados.sessao %}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h2 class="mb-0 me-2">Sessão {{ s.id }} – {{ s.descricao }}</h2>
+    <span class="badge {{ 'bg-secondary' if s.fim else 'bg-success' }}">{{ 'Encerrada' if s.fim else 'Em andamento' }}</span>
+    <a href="/validacao" class="btn btn-outline-secondary btn-sm ms-auto">Voltar</a>
+    <a href="/validacao/{{ s.id }}/relatorio.csv" class="btn btn-outline-primary btn-sm">Exportar CSV</a>
+    {% if not s.fim %}
+    <form method="post" action="/validacao/{{ s.id }}/encerrar" onsubmit="return confirm('Encerrar a sessão? Novas leituras não serão mais contadas.')">
+      <button class="btn btn-danger btn-sm">Encerrar sessão</button></form>
+    {% endif %}
+  </div>
+
+  <div class="card mb-4" id="resultado">
+    <div class="card-header fw-semibold">Resultado dos critérios de aceitação ({{ dados.atendidos }} de 6 atendidos)</div>
+    <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+      <thead><tr><th>Critério</th><th>Verificação</th><th>Aceitação</th><th>Resultado</th><th>Situação</th></tr></thead>
+      <tbody>
+      {% for c in dados.criterios %}
+        <tr><td class="fw-semibold">{{ c.criterio }}</td><td>{{ c.verificacao }}</td><td>{{ c.aceitacao }}</td><td>{{ c.resultado }}</td>
+          <td><span class="badge {{ 'bg-success' if c.status == 'Atendido' else ('bg-danger' if c.status == 'Não atendido' else 'bg-secondary') }}">{{ c.status }}</span></td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card h-100" id="leituras">
+        <div class="card-header fw-semibold">1. Leituras do balcão – conferir cada item ({{ dados.leituras|length }})</div>
+        <div class="card-body p-0" style="max-height:420px;overflow:auto;">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Horário</th><th>Produto lido</th><th>Tipo</th><th>Conferência</th></tr></thead>
+            <tbody>
+            {% for l in dados.leituras|reverse %}
+              <tr><td class="small">{{ l.data[11:19] }}</td><td>{{ l.produto or l.codigo }}{% if l.retida %} <span class="badge bg-warning text-dark">fila</span>{% endif %}</td><td>{{ l.tipo }}</td>
+                <td>
+                  <button class="btn btn-sm {{ 'btn-success' if l.correta == true else 'btn-outline-success' }}" onclick="marcar('{{ l.leitura_id }}',1,this)" aria-label="Leitura correta">Correta</button>
+                  <button class="btn btn-sm {{ 'btn-danger' if l.correta == false else 'btn-outline-danger' }}" onclick="marcar('{{ l.leitura_id }}',0,this)" aria-label="Leitura incorreta">Incorreta</button>
+                </td></tr>
+            {% else %}
+              <tr><td colspan="4" class="text-muted p-3">Aguardando leituras do dispositivo. Esta lista é atualizada ao recarregar a página.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card mb-4" id="digitacao">
+        <div class="card-header fw-semibold">2. Tempo de digitação</div>
+        <div class="card-body">
+          <p class="small text-muted">Peça ao operador que digite o código impresso na etiqueta e tecle Enter. O tempo é medido da primeira tecla até o Enter.</p>
+          <input id="campoDig" class="form-control form-control-lg" inputmode="numeric" autocomplete="off" placeholder="Digite o código e tecle Enter">
+          <div id="digStatus" class="small mt-2" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="card mb-4" id="robustez">
+        <div class="card-header fw-semibold">6. Queda proposital da rede</div>
+        <div class="card-body">
+          <p class="small text-muted">Desligue o roteador, faça algumas leituras, religue-o e informe quantos itens foram lidos sem conexão.</p>
+          <form method="post" action="/validacao/{{ s.id }}/queda" class="d-flex gap-2">
+            <input type="number" min="0" name="leituras_queda" class="form-control" value="{{ s.leituras_queda if s.leituras_queda is not none else '' }}" required>
+            <button class="btn btn-outline-primary">Salvar</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4 mt-1">
+    <div class="col-lg-5">
+      <div class="card h-100" id="contagem">
+        <div class="card-header fw-semibold">3. Contagem física</div>
+        <div class="card-body">
+          <form method="post" action="/validacao/{{ s.id }}/contagem" class="row g-2 mb-3">
+            <div class="col-12"><select name="produto_id" class="form-select" required>
+              {% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }}{% if p.cor %} {{ p.cor }}{% endif %}{% if p.tamanho %} {{ p.tamanho }}{% endif %}</option>{% endfor %}
+            </select></div>
+            <div class="col-7"><input type="number" step="0.01" min="0" name="qtd_fisica" class="form-control" placeholder="Quantidade contada" required></div>
+            <div class="col-5"><button class="btn btn-outline-primary w-100">Registrar</button></div>
+          </form>
+          <table class="table table-sm mb-0"><thead><tr><th>Produto</th><th>Sistema</th><th>Contado</th></tr></thead><tbody>
+          {% for c in dados.contagens %}<tr class="{{ 'table-danger' if c.sistema != c.fisica else '' }}"><td>{{ c.produto }}</td><td>{{ c.sistema }}</td><td>{{ c.fisica }}</td></tr>{% endfor %}
+          </tbody></table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card" id="questionario">
+        <div class="card-header fw-semibold">4 e 5. Questionário da gestora (SUS e utilidade da previsão)</div>
+        <div class="card-body">
+          {% if request.query_params.get('erro') %}<div class="alert alert-warning py-2">Responda todas as perguntas.</div>{% endif %}
+          <form method="post" action="/validacao/{{ s.id }}/questionario">
+            <input class="form-control mb-2" name="respondente" placeholder="Respondente (ex.: Gestora)" maxlength="100" required>
+            <p class="small text-muted mb-1">1 = discordo totalmente · 5 = concordo totalmente</p>
+            {% for p in perguntas %}
+            <div class="d-flex align-items-center border-bottom py-1">
+              <div class="small flex-grow-1">{{ loop.index }}. {{ p }}</div>
+              {% set qi = loop.index %}
+              {% for v in range(1,6) %}<label class="ms-2 small"><input type="radio" name="q{{ qi }}" value="{{ v }}" required> {{ v }}</label>{% endfor %}
+            </div>
+            {% endfor %}
+            <div class="d-flex align-items-center py-2">
+              <div class="small flex-grow-1 fw-semibold">A previsão de demanda por produto ajuda a decidir as compras?</div>
+              {% for v in range(1,6) %}<label class="ms-2 small"><input type="radio" name="utilidade" value="{{ v }}" required> {{ v }}</label>{% endfor %}
+            </div>
+            <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="sem_ajuda" value="1" id="semAjuda">
+              <label class="form-check-label small" for="semAjuda">Observação: a operadora concluiu as vendas sem ajuda do grupo</label></div>
+            <textarea class="form-control mb-2" name="comentario" rows="2" placeholder="Comentários e melhorias solicitadas"></textarea>
+            <button class="btn btn-primary">Salvar respostas</button>
+          </form>
+          {% for q in dados.questionarios %}
+            <div class="small mt-2 border-top pt-2"><b>{{ q.respondente }}</b>: SUS {{ q.sus }} · utilidade {{ q.utilidade }}/5{% if q.comentario %} · “{{ q.comentario }}”{% endif %}</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+<script>
+async function marcar(id, ok, btn){
+  const fd = new FormData(); fd.append('leitura_id', id); fd.append('correta', ok);
+  const r = await fetch('/validacao/{{ s.id }}/marcar', {method:'POST', body:fd});
+  if(r.ok){ const td = btn.parentElement; const [b1,b2] = td.querySelectorAll('button');
+    b1.className = 'btn btn-sm ' + (ok ? 'btn-success' : 'btn-outline-success');
+    b2.className = 'btn btn-sm ' + (ok ? 'btn-outline-danger' : 'btn-danger'); }
+}
+(function(){
+  const campo = document.getElementById('campoDig'), st = document.getElementById('digStatus');
+  let t0 = null;
+  campo.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); const codigo = campo.value.trim(); if (!codigo || t0 === null) return;
+      const ms = Math.round(performance.now() - t0); t0 = null; campo.value = '';
+      const r = await fetch('/validacao/{{ s.id }}/digitacao', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({codigo, duracao_ms: ms})});
+      const d = await r.json();
+      st.textContent = 'Registrado: ' + (ms/1000).toFixed(1).replace('.', ',') + ' s' + (d.codigo_valido ? '' : ' (código inexistente)');
+    } else if (t0 === null && e.key.length === 1) { t0 = performance.now(); }
+  });
+})();
+</script>
+{% endif %}
+</div>
+{% endblock %}

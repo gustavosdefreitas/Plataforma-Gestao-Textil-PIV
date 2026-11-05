@@ -223,6 +223,63 @@ async def lifespan(app: FastAPI):
             ADD COLUMN IF NOT EXISTS numero_venda INTEGER
         """))
 
+        # PI IV v1.5.0: tipo de operação no dispositivo, contagem de reenvios e módulo de validação
+        conn.execute(text("ALTER TABLE leituras_iot ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'venda'"))
+        conn.execute(text("ALTER TABLE leituras_iot ADD COLUMN IF NOT EXISTS reenvios INTEGER DEFAULT 0"))
+        conn.execute(text("ALTER TABLE leituras_iot ADD COLUMN IF NOT EXISTS retida BOOLEAN DEFAULT FALSE"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS validacao_sessoes (
+                id SERIAL PRIMARY KEY,
+                descricao VARCHAR(150) NOT NULL,
+                inicio TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                fim TIMESTAMP,
+                usuario_id INTEGER,
+                leituras_queda INTEGER
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS validacao_marcacoes (
+                id SERIAL PRIMARY KEY,
+                sessao_id INTEGER NOT NULL,
+                leitura_id VARCHAR(64) NOT NULL,
+                correta BOOLEAN NOT NULL DEFAULT TRUE,
+                UNIQUE (sessao_id, leitura_id)
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS validacao_digitacao (
+                id SERIAL PRIMARY KEY,
+                sessao_id INTEGER NOT NULL,
+                codigo VARCHAR(64) NOT NULL,
+                duracao_ms INTEGER NOT NULL,
+                correto BOOLEAN NOT NULL DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS validacao_contagem (
+                id SERIAL PRIMARY KEY,
+                sessao_id INTEGER NOT NULL,
+                produto_id INTEGER NOT NULL,
+                qtd_sistema NUMERIC(10,2) NOT NULL,
+                qtd_fisica NUMERIC(10,2) NOT NULL,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS validacao_questionario (
+                id SERIAL PRIMARY KEY,
+                sessao_id INTEGER NOT NULL,
+                respondente VARCHAR(100) NOT NULL,
+                respostas_sus TEXT NOT NULL,
+                nota_sus NUMERIC(5,1) NOT NULL,
+                utilidade_previsao INTEGER NOT NULL,
+                sem_ajuda BOOLEAN NOT NULL DEFAULT FALSE,
+                comentario TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """))
+
         conn.execute(text("""
             INSERT INTO usuarios (username, password, perfil)
             VALUES ('admin', :senha, 'admin')
@@ -3750,6 +3807,12 @@ class VendaScannerPayload(BaseModel):
     quantidade: float = 1.0
     cliente_nome: str = "Balcão"
     leitura_id: str | None = None  # identificador único gerado no dispositivo (v1.4.0)
+    tipo: str = "venda"            # v1.5.0: "venda", "entrada" ou "consulta", escolhido por etiqueta de controle
+    empresa_id: int | None = None  # v1.5.0: empresa à qual o dispositivo pertence (segregação)
+    retida: bool = False           # v1.5.0: leitura enviada a partir da fila (houve falha de rede)
+
+
+TIPOS_OPERACAO_SCANNER = {"venda", "entrada", "consulta"}
 
 
 @app.post("/api/venda/scanner")
@@ -3777,9 +3840,20 @@ async def api_venda_scanner(payload: VendaScannerPayload):
                 {"lid": payload.leitura_id}
             ).fetchone()
         if anterior:
+            with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE leituras_iot SET reenvios = COALESCE(reenvios, 0) + 1 WHERE leitura_id = :lid"),
+                    {"lid": payload.leitura_id}
+                )
             dados = json.loads(anterior.resposta or "{}")
             dados["duplicada"] = True
             return JSONResponse(dados)
+
+    tipo = (payload.tipo or "venda").strip().lower()
+    if tipo not in TIPOS_OPERACAO_SCANNER:
+        return JSONResponse(status_code=422, content={"erro": "Tipo de operação inválido"})
+    if payload.quantidade <= 0:
+        return JSONResponse(status_code=422, content={"erro": "Quantidade deve ser positiva"})
 
     codigo_limpo = payload.codigo.lstrip("0") or "0"
     try:
@@ -3799,6 +3873,46 @@ async def api_venda_scanner(payload: VendaScannerPayload):
 
         if not prod:
             return JSONResponse(status_code=404, content={"erro": "Produto não encontrado"})
+
+        # Segregação: o dispositivo só movimenta produtos da empresa em que está instalado
+        if payload.empresa_id is not None and prod.empresa_id != payload.empresa_id:
+            return JSONResponse(status_code=403, content={"erro": "Produto não pertence a esta empresa"})
+
+        if tipo == "consulta":
+            return JSONResponse({
+                "ok": True, "tipo": "consulta", "produto": prod.nome,
+                "preco_unitario": float(prod.preco), "estoque": float(prod.quantidade),
+                "duplicada": False,
+            })
+
+        if tipo == "entrada":
+            conn.execute(
+                text("UPDATE produtos SET quantidade = quantidade + :qtd WHERE id = :id"),
+                {"qtd": payload.quantidade, "id": prod.id}
+            )
+            resposta = {
+                "ok": True, "tipo": "entrada", "produto": prod.nome,
+                "quantidade": payload.quantidade,
+                "estoque": float(prod.quantidade) + payload.quantidade,
+                "duplicada": False,
+            }
+            try:
+                if payload.leitura_id:
+                    conn.execute(
+                        text("""
+                            INSERT INTO leituras_iot (leitura_id, codigo, usuario_id, resposta, tipo, retida)
+                            VALUES (:lid, :cod, :uid, :resp, 'entrada', :ret)
+                        """),
+                        {"lid": payload.leitura_id, "cod": payload.codigo, "uid": usuario.id,
+                         "resp": json.dumps(resposta), "ret": bool(payload.retida)}
+                    )
+                conn.commit()
+            except IntegrityError:
+                conn.rollback()
+                return JSONResponse({"ok": True, "tipo": "entrada", "duplicada": True, "produto": prod.nome})
+            registrar_log(usuario.id, usuario.nome or "scanner", "ENTRADA_SCANNER",
+                          f"{prod.nome}: +{payload.quantidade}")
+            return JSONResponse(resposta)
 
         if prod.quantidade < payload.quantidade:
             return JSONResponse(status_code=409, content={"erro": "Estoque insuficiente"})
@@ -3842,6 +3956,7 @@ async def api_venda_scanner(payload: VendaScannerPayload):
             "quantidade": payload.quantidade,
             "total": round(float(prod.preco) * payload.quantidade, 2),
             "comprovante_url": f"/vendas/comprovante/grupo/{grupo}",
+            "tipo": "venda",
             "duplicada": False,
         }
         try:
@@ -3849,11 +3964,12 @@ async def api_venda_scanner(payload: VendaScannerPayload):
                 # mesma transação da venda: se o identificador já existir, nada é gravado
                 conn.execute(
                     text("""
-                        INSERT INTO leituras_iot (leitura_id, codigo, usuario_id, numero_venda, grupo_venda, resposta)
-                        VALUES (:lid, :cod, :uid, :num, :grupo, :resp)
+                        INSERT INTO leituras_iot (leitura_id, codigo, usuario_id, numero_venda, grupo_venda, resposta, tipo, retida)
+                        VALUES (:lid, :cod, :uid, :num, :grupo, :resp, 'venda', :ret)
                     """),
                     {"lid": payload.leitura_id, "cod": payload.codigo, "uid": usuario.id,
-                     "num": num_venda, "grupo": grupo, "resp": json.dumps(resposta)}
+                     "num": num_venda, "grupo": grupo, "resp": json.dumps(resposta),
+                     "ret": bool(payload.retida)}
                 )
             conn.commit()
         except IntegrityError:
@@ -3861,6 +3977,381 @@ async def api_venda_scanner(payload: VendaScannerPayload):
             return JSONResponse({"ok": True, "duplicada": True, "produto": prod.nome})
 
     return JSONResponse(resposta)
+
+
+# ═════════════════════════════════════════════════════════════
+#  PI IV v1.5.0 — Etiquetas de controle do leitor
+# ═════════════════════════════════════════════════════════════
+
+ETIQUETAS_CONTROLE = {
+    "OP-VENDA":    ("Modo venda", "Cada leitura registra uma venda e baixa o estoque (padrão).", "1 piscada longa"),
+    "OP-ENTRADA":  ("Modo entrada", "Cada leitura soma uma unidade ao estoque (recebimento de mercadoria).", "2 piscadas longas"),
+    "OP-CONSULTA": ("Modo consulta", "A leitura apenas informa preço e saldo, sem alterar o estoque.", "3 piscadas longas"),
+}
+
+
+@app.get("/scanner/controle/{codigo}.png")
+async def scanner_controle_png(request: Request, codigo: str):
+    user = get_current_user(request)
+    if not user:
+        return JSONResponse(status_code=401, content={"erro": "Não autenticado"})
+    if codigo not in ETIQUETAS_CONTROLE:
+        return JSONResponse(status_code=404, content={"erro": "Etiqueta inexistente"})
+    return Response(content=gerar_barcode_bytes(codigo), media_type="image/png")
+
+
+@app.get("/scanner/etiquetas-controle", response_class=HTMLResponse)
+async def scanner_etiquetas_controle(request: Request):
+    user = get_current_user(request)
+    if not user or user.perfil != "admin":
+        return RedirectResponse("/", status_code=302)
+    return templates.TemplateResponse(request, "scanner_controle.html", {
+        "user": user, "etiquetas": ETIQUETAS_CONTROLE,
+    })
+
+
+# ═════════════════════════════════════════════════════════════
+#  PI IV v1.5.0 — Módulo de validação com a comunidade externa
+#  Calcula automaticamente os critérios do Quadro 6 do relatório
+# ═════════════════════════════════════════════════════════════
+
+SUS_PERGUNTAS = [
+    "Eu usaria este sistema com frequência.",
+    "Achei o sistema desnecessariamente complexo.",
+    "Achei o sistema fácil de usar.",
+    "Eu precisaria de ajuda técnica para conseguir usar o sistema.",
+    "As funções do sistema estão bem integradas.",
+    "Achei o sistema muito inconsistente.",
+    "A maioria das pessoas aprenderia a usar o sistema rapidamente.",
+    "Achei o sistema muito complicado de usar.",
+    "Senti-me confiante ao usar o sistema.",
+    "Precisei aprender muitas coisas antes de usar o sistema.",
+]
+VAL_MIN_LEITURAS = 100
+VAL_MIN_ACERTO = 0.95
+VAL_SUS_MINIMO = 68.0
+VAL_UTILIDADE_MINIMA = 4.0
+VAL_INTERVALO_MAX_S = 60.0   # intervalos maiores indicam pausa, não tempo de registro
+
+
+def nota_sus(respostas: list[int]) -> float:
+    """System Usability Scale (Brooke, 1996): itens ímpares r-1, pares 5-r, soma x 2,5."""
+    if len(respostas) != 10 or any(r < 1 or r > 5 for r in respostas):
+        raise ValueError("SUS exige 10 respostas entre 1 e 5")
+    soma = sum((r - 1) if i % 2 == 0 else (5 - r) for i, r in enumerate(respostas))
+    return soma * 2.5
+
+
+def _mediana(valores: list[float]) -> float | None:
+    if not valores:
+        return None
+    v = sorted(valores)
+    m = len(v) // 2
+    return v[m] if len(v) % 2 else (v[m - 1] + v[m]) / 2
+
+
+def _ts(valor):
+    if isinstance(valor, str):
+        return datetime.fromisoformat(valor)
+    return valor
+
+
+def calcular_validacao(conn, sessao_id: int) -> dict | None:
+    sessao = conn.execute(text("SELECT * FROM validacao_sessoes WHERE id = :id"), {"id": sessao_id}).fetchone()
+    if not sessao:
+        return None
+    filtro_fim = "AND l.data_leitura <= :fim" if sessao.fim else ""
+    params = {"ini": sessao.inicio, "sid": sessao_id}
+    if sessao.fim:
+        params["fim"] = sessao.fim
+    leituras = conn.execute(text(f"""
+        SELECT l.leitura_id, l.codigo, l.tipo, l.numero_venda, l.data_leitura,
+               COALESCE(l.reenvios, 0) AS reenvios, COALESCE(l.retida, FALSE) AS retida,
+               m.correta, p.nome AS produto_nome
+        FROM leituras_iot l
+        LEFT JOIN validacao_marcacoes m ON m.leitura_id = l.leitura_id AND m.sessao_id = :sid
+        LEFT JOIN produtos p ON p.id = CAST(l.codigo AS INTEGER)
+        WHERE l.data_leitura >= :ini {filtro_fim}
+        ORDER BY l.data_leitura
+    """), params).fetchall()
+
+    # 1. Confiabilidade da leitura (somente leituras conferidas pelo observador)
+    conferidas = [l for l in leituras if l.correta is not None]
+    corretas = sum(1 for l in conferidas if l.correta)
+    taxa = corretas / len(conferidas) if conferidas else None
+    c1_ok = len(conferidas) >= VAL_MIN_LEITURAS and taxa is not None and taxa >= VAL_MIN_ACERTO
+
+    # 2. Tempo de registro: intervalo entre leituras consecutivas x digitação do código
+    instantes = [_ts(l.data_leitura) for l in leituras]
+    intervalos = [(b - a).total_seconds() for a, b in zip(instantes, instantes[1:])]
+    intervalos = [i for i in intervalos if 0 < i <= VAL_INTERVALO_MAX_S]
+    t_leitura = _mediana(intervalos)
+    dig = conn.execute(text("SELECT duracao_ms, correto FROM validacao_digitacao WHERE sessao_id = :sid"),
+                       {"sid": sessao_id}).fetchall()
+    t_digitacao = _mediana([d.duracao_ms / 1000 for d in dig])
+    erros_dig = sum(1 for d in dig if not d.correto)
+    c2_ok = t_leitura is not None and t_digitacao is not None and t_leitura < t_digitacao
+
+    # 3. Consistência do inventário
+    cont = conn.execute(text("""
+        SELECT c.produto_id, p.nome, c.qtd_sistema, c.qtd_fisica
+        FROM validacao_contagem c LEFT JOIN produtos p ON p.id = c.produto_id
+        WHERE c.sessao_id = :sid ORDER BY c.id
+    """), {"sid": sessao_id}).fetchall()
+    divergencia = sum(abs(float(c.qtd_fisica) - float(c.qtd_sistema)) for c in cont)
+    itens_div = sum(1 for c in cont if float(c.qtd_fisica) != float(c.qtd_sistema))
+    c3_ok = len(cont) > 0 and divergencia == 0
+
+    # 4 e 5. Questionário (SUS, operação sem ajuda e utilidade da previsão)
+    quest = conn.execute(text("SELECT * FROM validacao_questionario WHERE sessao_id = :sid ORDER BY id"),
+                         {"sid": sessao_id}).fetchall()
+    sus_medio = sum(float(q.nota_sus) for q in quest) / len(quest) if quest else None
+    sem_ajuda = all(bool(q.sem_ajuda) for q in quest) if quest else None
+    utilidade = sum(q.utilidade_previsao for q in quest) / len(quest) if quest else None
+    c4_ok = sus_medio is not None and sus_medio >= VAL_SUS_MINIMO and bool(sem_ajuda)
+    c5_ok = utilidade is not None and utilidade >= VAL_UTILIDADE_MINIMA
+
+    # 6. Robustez: leituras retidas durante a queda de rede x vendas efetivamente registradas
+    vendas_l = [l for l in leituras if l.tipo == "venda" and l.numero_venda is not None]
+    retidas = [l for l in leituras if l.retida]
+    nums = [l.numero_venda for l in vendas_l]
+    baixas = 0
+    if nums:
+        baixas = conn.execute(text(
+            "SELECT COUNT(*) FROM vendas WHERE numero_venda IN (" + ",".join(str(int(n)) for n in nums) + ")"
+        )).scalar() or 0
+    duplicadas = max(0, baixas - len(set(nums)))
+    reenvios = sum(l.reenvios for l in leituras)
+    declaradas = sessao.leituras_queda
+    c6_ok = declaradas is not None and declaradas > 0 and len(retidas) == declaradas and duplicadas == 0
+
+    def st(ok, tem_dados):
+        return "Atendido" if ok else ("Não atendido" if tem_dados else "Sem dados")
+
+    fmt = lambda v, n=1: "—" if v is None else f"{v:.{n}f}".replace(".", ",")
+    criterios = [
+        {"criterio": "Confiabilidade da leitura",
+         "verificacao": f"{len(conferidas)} leituras conferidas no balcão",
+         "aceitacao": f"Ao menos {VAL_MIN_LEITURAS} leituras e {int(VAL_MIN_ACERTO*100)}% corretas",
+         "resultado": f"{corretas} de {len(conferidas)} corretas ({fmt(taxa*100 if taxa is not None else None)}%)",
+         "status": st(c1_ok, bool(conferidas))},
+        {"criterio": "Tempo de registro",
+         "verificacao": f"Mediana de {len(intervalos)} intervalos entre leituras x {len(dig)} digitações",
+         "aceitacao": "Leitura mais rápida que a digitação",
+         "resultado": f"Leitura {fmt(t_leitura)} s x digitação {fmt(t_digitacao)} s ({erros_dig} código(s) digitado(s) errado)",
+         "status": st(c2_ok, t_leitura is not None and t_digitacao is not None)},
+        {"criterio": "Consistência do inventário",
+         "verificacao": f"Contagem física de {len(cont)} produto(s)",
+         "aceitacao": "Divergência nula",
+         "resultado": f"{itens_div} item(ns) divergente(s); diferença total {fmt(divergencia, 0)} un.",
+         "status": st(c3_ok, bool(cont))},
+        {"criterio": "Usabilidade",
+         "verificacao": f"SUS respondido por {len(quest)} pessoa(s) e observação da operação",
+         "aceitacao": f"SUS ≥ {int(VAL_SUS_MINIMO)} e operação sem ajuda",
+         "resultado": f"SUS médio {fmt(sus_medio)}; sem ajuda: {'sim' if sem_ajuda else ('não' if quest else '—')}",
+         "status": st(c4_ok, bool(quest))},
+        {"criterio": "Utilidade da previsão",
+         "verificacao": "Avaliação da gestora (escala de 1 a 5)",
+         "aceitacao": f"Nota média ≥ {int(VAL_UTILIDADE_MINIMA)}",
+         "resultado": f"Nota média {fmt(utilidade)}",
+         "status": st(c5_ok, bool(quest))},
+        {"criterio": "Robustez",
+         "verificacao": f"Queda proposital da rede; {declaradas if declaradas is not None else '—'} leitura(s) feitas sem conexão",
+         "aceitacao": "Nenhuma leitura perdida ou duplicada",
+         "resultado": f"{len(retidas)} recebida(s) da fila; {duplicadas} baixa(s) duplicada(s); {reenvios} reenvio(s) ignorado(s)",
+         "status": st(c6_ok, declaradas is not None)},
+    ]
+    return {
+        "sessao": {"id": sessao.id, "descricao": sessao.descricao,
+                   "inicio": str(sessao.inicio), "fim": str(sessao.fim) if sessao.fim else None,
+                   "leituras_queda": declaradas},
+        "criterios": criterios,
+        "atendidos": sum(1 for c in criterios if c["status"] == "Atendido"),
+        "leituras": [{"leitura_id": l.leitura_id, "codigo": l.codigo, "produto": l.produto_nome,
+                      "tipo": l.tipo, "data": str(l.data_leitura), "correta": l.correta,
+                      "retida": bool(l.retida)} for l in leituras],
+        "contagens": [{"produto": c.nome, "sistema": float(c.qtd_sistema), "fisica": float(c.qtd_fisica)} for c in cont],
+        "questionarios": [{"respondente": q.respondente, "sus": float(q.nota_sus), "utilidade": q.utilidade_previsao,
+                           "sem_ajuda": bool(q.sem_ajuda), "comentario": q.comentario} for q in quest],
+    }
+
+
+def _admin(request: Request):
+    user = get_current_user(request)
+    return user if user and user.perfil == "admin" else None
+
+
+@app.get("/validacao", response_class=HTMLResponse)
+async def validacao_lista(request: Request):
+    user = _admin(request)
+    if not user:
+        return RedirectResponse("/", status_code=302)
+    with engine.connect() as conn:
+        sessoes = conn.execute(text("SELECT * FROM validacao_sessoes ORDER BY id DESC")).fetchall()
+    return templates.TemplateResponse(request, "validacao.html", {
+        "user": user, "sessoes": sessoes, "dados": None,
+    })
+
+
+@app.post("/validacao/nova")
+async def validacao_nova(request: Request, descricao: str = Form(...)):
+    user = _admin(request)
+    if not user:
+        return RedirectResponse("/", status_code=302)
+    with engine.begin() as conn:
+        sid = conn.execute(text("""
+            INSERT INTO validacao_sessoes (descricao, usuario_id) VALUES (:d, :u) RETURNING id
+        """), {"d": descricao.strip()[:150], "u": user.id}).scalar()
+    registrar_log(user.id, user.username, "VALIDACAO_INICIADA", descricao[:150])
+    return RedirectResponse(f"/validacao/{sid}", status_code=303)
+
+
+@app.get("/validacao/{sessao_id}", response_class=HTMLResponse)
+async def validacao_detalhe(request: Request, sessao_id: int):
+    user = _admin(request)
+    if not user:
+        return RedirectResponse("/", status_code=302)
+    with engine.connect() as conn:
+        dados = calcular_validacao(conn, sessao_id)
+        produtos = conn.execute(text("SELECT id, nome, cor, tamanho, quantidade FROM produtos ORDER BY nome")).fetchall()
+    if not dados:
+        return RedirectResponse("/validacao", status_code=302)
+    return templates.TemplateResponse(request, "validacao.html", {
+        "user": user, "sessoes": None, "dados": dados,
+        "produtos": produtos, "perguntas": SUS_PERGUNTAS,
+    })
+
+
+@app.get("/api/validacao/{sessao_id}")
+async def api_validacao(request: Request, sessao_id: int):
+    if not _admin(request):
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+    with engine.connect() as conn:
+        dados = calcular_validacao(conn, sessao_id)
+    if not dados:
+        return JSONResponse(status_code=404, content={"erro": "Sessão não encontrada"})
+    return JSONResponse(dados)
+
+
+@app.post("/validacao/{sessao_id}/marcar")
+async def validacao_marcar(request: Request, sessao_id: int,
+                           leitura_id: str = Form(...), correta: str = Form(...)):
+    if not _admin(request):
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM validacao_marcacoes WHERE sessao_id = :s AND leitura_id = :l"),
+                     {"s": sessao_id, "l": leitura_id})
+        conn.execute(text("INSERT INTO validacao_marcacoes (sessao_id, leitura_id, correta) VALUES (:s, :l, :c)"),
+                     {"s": sessao_id, "l": leitura_id, "c": correta == "1"})
+    return JSONResponse({"ok": True})
+
+
+class DigitacaoPayload(BaseModel):
+    codigo: str
+    duracao_ms: int
+
+
+@app.post("/validacao/{sessao_id}/digitacao")
+async def validacao_digitacao(request: Request, sessao_id: int, payload: DigitacaoPayload):
+    if not _admin(request):
+        return JSONResponse(status_code=403, content={"erro": "Acesso negado"})
+    codigo = payload.codigo.strip()
+    with engine.begin() as conn:
+        try:
+            existe = conn.execute(text("SELECT 1 FROM produtos WHERE id = :id"),
+                                  {"id": int(codigo.lstrip("0") or "0")}).fetchone() is not None
+        except ValueError:
+            existe = False
+        conn.execute(text("""
+            INSERT INTO validacao_digitacao (sessao_id, codigo, duracao_ms, correto)
+            VALUES (:s, :c, :d, :ok)
+        """), {"s": sessao_id, "c": codigo[:64], "d": max(0, payload.duracao_ms), "ok": existe})
+    return JSONResponse({"ok": True, "codigo_valido": existe})
+
+
+@app.post("/validacao/{sessao_id}/contagem")
+async def validacao_contagem(request: Request, sessao_id: int,
+                             produto_id: int = Form(...), qtd_fisica: float = Form(...)):
+    if not _admin(request):
+        return RedirectResponse("/", status_code=302)
+    with engine.begin() as conn:
+        qtd = conn.execute(text("SELECT quantidade FROM produtos WHERE id = :id"), {"id": produto_id}).scalar()
+        if qtd is not None:
+            conn.execute(text("""
+                INSERT INTO validacao_contagem (sessao_id, produto_id, qtd_sistema, qtd_fisica)
+                VALUES (:s, :p, :qs, :qf)
+            """), {"s": sessao_id, "p": produto_id, "qs": float(qtd), "qf": qtd_fisica})
+    return RedirectResponse(f"/validacao/{sessao_id}#contagem", status_code=303)
+
+
+@app.post("/validacao/{sessao_id}/questionario")
+async def validacao_questionario(request: Request, sessao_id: int):
+    if not _admin(request):
+        return RedirectResponse("/", status_code=302)
+    form = await request.form()
+    try:
+        respostas = [int(form.get(f"q{i}", 0)) for i in range(1, 11)]
+        nota = nota_sus(respostas)
+        utilidade = int(form.get("utilidade", 0))
+        if not 1 <= utilidade <= 5:
+            raise ValueError
+    except ValueError:
+        return RedirectResponse(f"/validacao/{sessao_id}?erro=questionario#questionario", status_code=303)
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO validacao_questionario
+              (sessao_id, respondente, respostas_sus, nota_sus, utilidade_previsao, sem_ajuda, comentario)
+            VALUES (:s, :r, :rs, :n, :u, :a, :c)
+        """), {"s": sessao_id, "r": (form.get("respondente") or "Gestora")[:100], "rs": json.dumps(respostas),
+               "n": nota, "u": utilidade, "a": form.get("sem_ajuda") == "1",
+               "c": (form.get("comentario") or "").strip() or None})
+    return RedirectResponse(f"/validacao/{sessao_id}#resultado", status_code=303)
+
+
+@app.post("/validacao/{sessao_id}/queda")
+async def validacao_queda(request: Request, sessao_id: int, leituras_queda: int = Form(...)):
+    if not _admin(request):
+        return RedirectResponse("/", status_code=302)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE validacao_sessoes SET leituras_queda = :q WHERE id = :id"),
+                     {"q": max(0, leituras_queda), "id": sessao_id})
+    return RedirectResponse(f"/validacao/{sessao_id}#robustez", status_code=303)
+
+
+@app.post("/validacao/{sessao_id}/encerrar")
+async def validacao_encerrar(request: Request, sessao_id: int):
+    user = _admin(request)
+    if not user:
+        return RedirectResponse("/", status_code=302)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE validacao_sessoes SET fim = CURRENT_TIMESTAMP WHERE id = :id AND fim IS NULL"),
+                     {"id": sessao_id})
+    registrar_log(user.id, user.username, "VALIDACAO_ENCERRADA", f"Sessão {sessao_id}")
+    return RedirectResponse(f"/validacao/{sessao_id}#resultado", status_code=303)
+
+
+@app.get("/validacao/{sessao_id}/relatorio.csv")
+async def validacao_csv(request: Request, sessao_id: int):
+    if not _admin(request):
+        return RedirectResponse("/", status_code=302)
+    with engine.connect() as conn:
+        dados = calcular_validacao(conn, sessao_id)
+    if not dados:
+        return RedirectResponse("/validacao", status_code=302)
+    buf = StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Critério", "Verificação", "Aceitação", "Resultado", "Situação"])
+    for c in dados["criterios"]:
+        w.writerow([c["criterio"], c["verificacao"], c["aceitacao"], c["resultado"], c["status"]])
+    w.writerow([])
+    w.writerow(["Leitura", "Código", "Produto", "Tipo", "Data", "Conferência", "Retida na fila"])
+    for l in dados["leituras"]:
+        conf = "" if l["correta"] is None else ("correta" if l["correta"] else "incorreta")
+        w.writerow([l["leitura_id"], l["codigo"], l["produto"] or "", l["tipo"], l["data"], conf,
+                    "sim" if l["retida"] else "não"])
+    return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=validacao_{sessao_id}.csv"})
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
